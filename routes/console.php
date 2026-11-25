@@ -31,6 +31,10 @@ Artisan::command('pos:reconcile-subscriptions', function (): int {
         ->where('state', 'starting')->where('created_at', '<', now()->subMinutes(2))
         ->update(['state' => 'review']);
 
+    \Illuminate\Support\Facades\DB::table('subscription_payment_attempts')
+        ->where('state', 'pending')->where('created_at', '<', now()->subDay())
+        ->update(['state' => 'review']);
+
     $attempts = \Illuminate\Support\Facades\DB::table('subscription_payment_attempts')
         ->where('state', 'pending')
         ->where(fn ($query) => $query->whereNull('checked_at')->orWhere('checked_at', '<', now()->subMinute()))

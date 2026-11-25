@@ -15,6 +15,7 @@ See [POS architecture](docs/architecture.md) for domain boundaries, analytics de
 - [Bulk imports](#bulk-imports)
 - [Audit trail](#audit-trail)
 - [Checkout](#checkout)
+- [Subscriptions and M-Pesa](#subscriptions-and-m-pesa)
 - [Email notifications](#email-notifications)
 - [Deploy and operate](#deploy-and-operate)
 - [Troubleshooting](#troubleshooting)
@@ -116,7 +117,7 @@ Use `http://localhost:8000/api/v1` as the local API base. Send `Accept: applicat
 3. Sign in as that shop administrator, create a branch, and add staff. Use `GET /me` to initialize role-aware navigation. Shop and branch authorization are enforced by the API based on the authenticated user.
 4. Use `POST /auth/forgot-password` with `email` and `POST /auth/reset-password` with `email`, `token`, `password`, and `password_confirmation`. The reset revokes active tokens. `POST /auth/logout` revokes the current token.
 
-The Nuxt starter's local-storage workflows still require wiring to these endpoints. Camera scanning and printer dialogs stay in the browser. M-Pesa, card, and bank transfer are recorded as payment methods. Payment provider integration and printer hardware bridges are outside this implementation.
+The Nuxt starter's local-storage workflows still require wiring to these endpoints. Camera scanning and printer dialogs stay in the browser. Retail checkout records M-Pesa, card, and bank transfer as tenders. Subscription billing has a separate Daraja STK Push integration. Printer hardware bridges are outside this implementation.
 
 ## Roles and permissions
 
@@ -215,6 +216,40 @@ Example `POST /api/v1/sales/checkout` body:
 
 Use `cash`, `mpesa`, `card`, `bank_transfer`, or `credit`. Credit requires `customer_id`. Optional `customer` fields are `name`, `phone`, and `email`. Use `reference` for a payment reference. The backend calculates totals from the shop's prices and tax settings. It commits the sale, stock movements, credit balance, and payment together. An identical retry by the same user returns the existing sale or payment. Reusing the key for a different request returns `409`.
 
+## Subscriptions and M-Pesa
+
+The super admin configures plan names, prices and terms. Use `interval_months` values of 1, 3, 6, or 12 for monthly, quarterly, half-yearly, or yearly plans. The API also supports custom terms from 1 to 36 months. Subscription invoices are in KES, use whole-shilling amounts for STK Push, and preserve the plan name, term, and price at issuance. For example, `30000` represents KES 300.
+
+| Action | Route and request |
+| --- | --- |
+| List plans | `GET /api/v1/billing/plans`. Shop users see active plans. |
+| Manage plans | Super admin `POST /api/v1/billing/plans` with `name`, `interval_months`, `amount_minor`, and optional `active`. Edit via `PATCH /api/v1/billing/plans/{id}`. |
+| Create invoice | Shop administrator `POST /api/v1/billing/invoices` with `plan_id` and a UUID `idempotency_key`. |
+| Review invoices | `GET /api/v1/billing/invoices` and `GET /api/v1/billing/invoices/{id}`. Open invoices with no unresolved payment may be cancelled via `POST /api/v1/billing/invoices/{id}/cancel`. |
+| Request STK Push | `POST /api/v1/billing/invoices/{id}/mpesa` with `phone` and a UUID `idempotency_key`. Save the returned attempt ID. |
+| Check payment | `POST /api/v1/billing/payments/{attempt}/reconcile` checks the attempt against Daraja. Use `GET /api/v1/billing/subscription` for current coverage and status. |
+| Review exceptions | Super admin `GET /api/v1/billing/reconciliation`, optionally filtered by `state` or `shop_id`. |
+
+Apply the migrations and configure the Daraja application in `.env`:
+
+```dotenv
+MPESA_ENVIRONMENT=sandbox
+MPESA_CONSUMER_KEY=
+MPESA_CONSUMER_SECRET=
+MPESA_SHORTCODE=
+MPESA_PASSKEY=
+MPESA_CALLBACK_URL=https://pos.example.com/api/v1/billing/mpesa/callback
+MPESA_TRANSACTION_TYPE=CustomerPayBillOnline
+```
+
+Use the registered shortcode, transaction type, and credentials for your Daraja environment. The callback must be reachable over HTTPS. Run `php artisan schedule:run` every minute using the Laravel scheduler, or run `php artisan pos:reconcile-subscriptions` on demand.
+
+- A pending prompt, callback, or network error cannot activate a subscription. The backend confirms the matching merchant and checkout IDs through the authenticated Daraja status query before marking the invoice paid.
+- A confirmed payment extends coverage once, from the current end date when coverage is active or from confirmation when coverage has elapsed. Renewal requires another invoice and customer-authorized STK prompt. Subscription status is available to Nuxt while POS routes stay accessible.
+- Use the same UUID for an identical retry. A new STK request is blocked while the current attempt is unresolved. Unknown submissions and pending attempts older than 24 hours go to review.
+- Query a review attempt again if it has a checkout ID. If the provider confirms no debit, a super admin may call `POST /api/v1/billing/reconciliation/{attempt}/close-review` with `confirmed_no_debit: true` and `provider_reference` after reviewing the provider portal. This action is audited. Escalate unresolved debits to provider support.
+- Reconciliation covers subscription invoice payment confirmation. Merchant settlement statements and retail till reconciliation are outside this flow.
+
 ## Email notifications
 
 - New shop administrators and staff receive a password-setup link. This includes shop onboarding, direct account creation, staff invitations, and user imports. Setup links use the password recovery page and expire after 60 minutes. A person can request a new link from the sign-in page.
@@ -249,7 +284,7 @@ With the default PostgreSQL connection used for the database queue, new mail job
 1. Serve Laravel over HTTPS with the web root at `public/`. Set `APP_ENV=production`, `APP_DEBUG=false`, and the real `APP_URL` and `FRONTEND_URL`. Store `APP_KEY`, database credentials, and mail credentials in the environment's secret store.
 2. Run `composer install --no-dev --optimize-autoloader` during the build. Run `php artisan migrate --force` with the schema migration account during deployment, then cache configuration and routes. Keep `storage/` and `bootstrap/cache/` writable by the runtime. Use the non-owner application role described in [Audit trail](#audit-trail) for API traffic.
 3. Configure shared rate-limit storage for multiple API instances and set up SMTP and a supervised worker for email delivery. Verify the origin, invitation link, sign-in, and receipt printing on the intended register devices.
-4. Back up PostgreSQL regularly and test restoring both business and audit tables. Monitor checkout errors, database lock waits, disk usage, and mail delivery. Confirm applicable fiscal invoicing requirements before going live. The current backend records tenders and prints receipt data through the frontend. Live settlement, returns, split tenders, register shifts, and eTIMS integration are covered in the [architecture roadmap](docs/architecture.md).
+4. Back up PostgreSQL regularly and test restoring both business and audit tables. Monitor checkout errors, database lock waits, disk usage, and mail delivery. Confirm applicable fiscal invoicing requirements before going live. The current backend records tenders and prints receipt data through the frontend. Retail settlement, returns, split tenders, register shifts, and eTIMS integration are covered in the [architecture roadmap](docs/architecture.md).
 
 ## Troubleshooting
 

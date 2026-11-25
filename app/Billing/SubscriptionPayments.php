@@ -72,11 +72,11 @@ class SubscriptionPayments
 
     public function reconcile(object $attempt): object
     {
-        if ($attempt->state !== 'pending') {
+        if (! in_array($attempt->state, ['pending', 'review'], true) || $attempt->checkout_request_id === null) {
             return $attempt;
         }
         abort_unless($this->daraja->configured(), 503, 'M-Pesa is unavailable.');
-        $claim = DB::table('subscription_payment_attempts')->where('id', $attempt->id)->where('state', 'pending')
+        $claim = DB::table('subscription_payment_attempts')->where('id', $attempt->id)->whereIn('state', ['pending', 'review'])
             ->where(fn ($query) => $query->whereNull('checked_at')->orWhere('checked_at', '<', now()->subSeconds(30)))
             ->update(['checked_at' => now()]);
         if ($claim === 0) {
@@ -99,7 +99,7 @@ class SubscriptionPayments
         if ($result === '0') {
             $this->settle($attempt);
         } elseif (in_array($result, ['1', '1032'], true)) {
-            DB::table('subscription_payment_attempts')->where('id', $attempt->id)->where('state', 'pending')
+            DB::table('subscription_payment_attempts')->where('id', $attempt->id)->whereIn('state', ['pending', 'review'])
                 ->update(['state' => 'failed', 'result_code' => $result]);
         }
 
@@ -111,7 +111,7 @@ class SubscriptionPayments
         DB::transaction(function () use ($attempt): void {
             DB::table('shops')->where('id', $attempt->shop_id)->lockForUpdate()->firstOrFail();
             $attempt = DB::table('subscription_payment_attempts')->where('id', $attempt->id)->lockForUpdate()->firstOrFail();
-            if ($attempt->state !== 'pending') {
+            if (! in_array($attempt->state, ['pending', 'review'], true)) {
                 return;
             }
             $invoiceQuery = DB::table('subscription_invoices')->where('id', $attempt->invoice_id);
@@ -128,7 +128,7 @@ class SubscriptionPayments
                 'shop_id' => $attempt->shop_id,
                 'plan_id' => $invoice->plan_id,
                 'covered_from' => $start === $expiry && $current !== null ? CarbonImmutable::parse($current->covered_from)->utc() : $now,
-                'covered_until' => $start->addMonthsNoOverflow($invoice->interval_months),
+                'covered_until' => $start->setTimezone('Africa/Nairobi')->addMonthsNoOverflow($invoice->interval_months)->utc(),
                 'last_invoice_id' => $invoice->id,
             ]], ['shop_id'], ['plan_id', 'covered_from', 'covered_until', 'last_invoice_id']);
             $invoiceQuery->update(['paid_at' => $now]);

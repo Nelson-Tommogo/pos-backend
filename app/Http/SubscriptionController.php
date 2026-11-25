@@ -159,7 +159,9 @@ class SubscriptionController
         return DB::transaction(function () use ($attempt, $actor, $data) {
             $query = DB::table('subscription_payment_attempts')->where('id', $attempt);
             $record = (clone $query)->lockForUpdate()->firstOrFail();
-            abort_unless($record->state === 'review' && $record->checkout_request_id === null, 409, 'This attempt is not eligible for manual closure.');
+            abort_unless($record->state === 'review', 409, 'This attempt is not eligible for manual closure.');
+            abort_if($record->checked_at !== null && CarbonImmutable::parse($record->checked_at)->gt(now()->subMinute()),
+                409, 'Wait for the provider status check to finish.');
             $query->update(['state' => 'failed', 'checked_at' => now()]);
             AuditTrail::record($actor, 'subscription.review.close', 'subscription_payment', $attempt,
                 details: ['provider_reference' => $data['provider_reference']], shopId: $record->shop_id);
