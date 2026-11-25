@@ -30,7 +30,8 @@ class ReportsController
         $payments = $workspace->operations('payments');
         $expenses = $workspace->operations('expenses')->whereBetween('incurred_on', [$from->toDateString(), $to->toDateString()]);
         $inventory = $workspace->operations('inventory');
-        foreach ([$sales, $payments, $inventory, $expenses] as $query) {
+        $purchases = $workspace->operations('purchases');
+        foreach ([$sales, $payments, $inventory, $expenses, $purchases] as $query) {
             if ($branch !== null) {
                 $query->where('branch_id', $branch);
             }
@@ -39,7 +40,7 @@ class ReportsController
             $query->where('created_at', '>=', $from->utc())->where('created_at', '<', $to->addDay()->utc());
         }
 
-        return DB::transaction(function () use ($workspace, $sales, $payments, $inventory, $expenses, $zone, $from, $to): array {
+        return DB::transaction(function () use ($workspace, $sales, $payments, $inventory, $expenses, $purchases, $zone, $from, $to): array {
             DB::statement('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
             $totals = (clone $sales)->selectRaw('count(*) AS sale_count, coalesce(sum(total_minor), 0)::bigint AS sales_minor, coalesce(round(avg(total_minor)), 0)::bigint AS average_minor')->first();
             $lines = (clone $sales)->crossJoin(DB::raw('LATERAL jsonb_array_elements(items) AS line'));
@@ -48,6 +49,21 @@ class ReportsController
                 ->value('cost_minor');
             $subtotal = (int) (clone $sales)->sum('subtotal_minor');
             $tax = (int) (clone $sales)->sum('tax_minor');
+            $purchaseSummary = $purchases
+                ->crossJoin(DB::raw('LATERAL jsonb_array_elements(purchases.items) AS item'))
+                ->selectRaw(
+                    "count(DISTINCT purchases.id) FILTER (WHERE created_at >= ? AND created_at < ?) AS orders_placed,
+                     count(DISTINCT purchases.id) FILTER (WHERE received_at >= ? AND received_at < ?) AS orders_received,
+                     coalesce(sum((item->>'cost_minor')::bigint * (item->>'quantity')::bigint)
+                         FILTER (WHERE received_at >= ? AND received_at < ?), 0)::bigint AS received_cost_minor",
+                    [$from->utc(), $to->addDay()->utc(), $from->utc(), $to->addDay()->utc(), $from->utc(), $to->addDay()->utc()],
+                )
+                ->where(function ($query) use ($from, $to): void {
+                    $start = $from->utc();
+                    $end = $to->addDay()->utc();
+                    $query->where(fn ($query) => $query->where('created_at', '>=', $start)->where('created_at', '<', $end))
+                        ->orWhere(fn ($query) => $query->where('received_at', '>=', $start)->where('received_at', '<', $end));
+                })->first();
             $low = (clone $inventory)->whereColumn('quantity', '<=', 'reorder_level');
 
             return [
@@ -56,6 +72,7 @@ class ReportsController
                 'timezone' => $zone,
                 'currency' => $workspace->settings()->currency,
                 'totals' => $totals,
+                'purchases' => $purchaseSummary,
                 'gross_profit_minor' => $subtotal - $cost,
                 'financial_summary' => [
                     'sales_excluding_tax_minor' => $subtotal,

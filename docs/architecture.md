@@ -47,7 +47,7 @@ Retail order APIs commonly represent line items, modifiers, taxes and adjustment
 
 ## Analytics contract
 
-`GET /api/v1/reports` and `GET /api/v1/dashboard` expose the same finance-authorized dataset. Filter by inclusive date range, reporting timezone, and authorized branch. Sales and payments use UTC instants mapped to local day boundaries. Expenses use their recorded business date. Inventory metrics describe current stock, independent of the date range.
+`GET /api/v1/analytics`, `GET /api/v1/reports`, and `GET /api/v1/dashboard` expose the same finance-authorized dataset. Filter by inclusive date range, reporting timezone, and authorized branch. Sales and payments use UTC instants mapped to local day boundaries. Expenses use their recorded business date. Inventory metrics describe current stock, independent of the date range.
 
 | Metric | Definition |
 | --- | --- |
@@ -55,6 +55,7 @@ Retail order APIs commonly represent line items, modifiers, taxes and adjustment
 | Sales excluding tax and tax | Sum of the receipt subtotals and recorded tax respectively. |
 | Estimated cost and gross profit | Sale-time unit cost multiplied by quantity. Gross profit is pre-tax sales minus estimated cost. |
 | Credit sales and repayments | Separate sums of credit sale tenders and posted repayments. Credit tender is included in the sales payment mix. |
+| Purchases | Orders placed by creation date, orders received by receipt date, and received quantities multiplied by the purchase order unit costs. |
 | Recorded expenses | Expense amounts with an incurred date in the requested period. |
 | Top products | Top 20 products by pre-tax line revenue with units sold. Historical sale lines provide the quantities and amounts. |
 | Cashier and daily sales | Completed receipts grouped by operator or by reporting day and branch. |

@@ -55,7 +55,7 @@ Routes below are relative to `/api/v1`.
 | Purchases | `GET /purchases[/{id}]`, `POST /purchases`, `PATCH /purchases/{id}`. Send `branch_id`, `supplier_id`, and `items` with `product_id`, `quantity`, and `cost_minor`. `POST /purchases/{id}/receive` receives the full order and can be retried. Received orders are locked. |
 | Sales and receipts | `POST /sales/checkout`, `GET /sales[/{id}]`, `GET /receipts[/{id}]`. Receipt details contain the item, customer, tax, branding, and payment data captured at checkout. |
 | Credit and payments | `GET /credit-customers`, `POST /credit-customers/{customer}/repayments`, `GET /payments[/{id}]`, `POST /payments`. A repayment or manual payment takes `idempotency_key` (UUID), `branch_id`, `method`, `amount_minor`, and optional `reference`. Payments are append-only. |
-| Analytics | `GET /reports` and `GET /dashboard` accept `from` and `to` as inclusive `YYYY-MM-DD` dates, optional `branch_id`, and `timezone`. The default is the past seven days including today in `Africa/Nairobi`. |
+| Analytics | `GET /analytics`, `GET /reports`, and `GET /dashboard` accept `from` and `to` as inclusive `YYYY-MM-DD` dates, optional `branch_id`, and `timezone`. The default is the past seven days including today in `Africa/Nairobi`. |
 | Settings | `GET /settings`, `PATCH /settings` for `name`, `currency`, `tax_bps`, and `receipt` fields `name`, `address`, `phone`, `footer`, and `accent`. `PATCH /preferences` accepts `theme`, `paper_mm` (58, 80, or 210), and `print_after_checkout`. |
 
 A branch takes `name` and optional `address`. Products take `name`, `sku`, `price_minor`, `cost_minor`, and optional `barcode`, `category`, and `variant`. Suppliers and customers take `name` and optional `email`, `phone`, and `address`. Administrators can set `credit_limit_minor` on customers. Expenses take `branch_id`, `description`, `amount_minor`, and `incurred_on` as `YYYY-MM-DD`.
@@ -64,7 +64,7 @@ Shop roles are `administrator`, `branch_manager`, `store_manager`, `cashier`, `t
 
 ### Analytics response
 
-Both analytics routes retain the sales totals, daily sales, payment mix, cashier totals, and inventory summaries. `financial_summary` adds pre-tax sales, tax, estimated cost, recorded expenses, credit sales, and credit repayments. `top_products` returns up to 20 product IDs ranked by pre-tax sales with units sold. The date range filters financial activity. Stock summaries report current balances.
+The analytics routes return the sales totals, daily sales, payment mix, cashier totals, and inventory summaries. `financial_summary` adds pre-tax sales, tax, estimated cost, recorded expenses, credit sales, and credit repayments. `top_products` returns up to 20 product IDs ranked by pre-tax sales with units sold. `purchases` includes orders placed during the period, orders received during the period, and the total cost of received items in minor units. Receiving costs are tracked separately from the sale-time costs used to estimate gross profit. The date range filters financial activity. Stock summaries report current balances.
 
 ## Checkout
 

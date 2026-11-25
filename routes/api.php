@@ -55,6 +55,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('payments', [PaymentsController::class, 'save']);
         Route::get('credit-customers', [PaymentsController::class, 'creditCustomers']);
         Route::post('credit-customers/{customer}/repayments', [PaymentsController::class, 'save'])->whereNumber('customer');
+        Route::get('analytics', [ReportsController::class, 'index']);
         Route::get('reports', [ReportsController::class, 'index']);
         Route::get('dashboard', [ReportsController::class, 'index']);
 
