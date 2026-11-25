@@ -14,12 +14,12 @@ class AuthController
     public function login(Request $request)
     {
         $data = $request->validate(['email' => 'required|email|max:255', 'password' => ['required', 'string', 'regex:/\\A[^\\x00]{1,72}\\z/']]);
-        $user = User::where('email', strtolower($data['email']))->first();
-        if (! Hash::check($data['password'], $user?->password ?? '$2y$12$GMxmZYsWIMmOWUzC7f8CHuCAine6ZDgObGtiAdy/vjdYcwsKb.aMe') || ! $user) {
-            throw ValidationException::withMessages(['email' => 'The credentials are invalid.']);
-        }
+        return DB::transaction(function () use ($data): array {
+            $user = User::where('email', strtolower($data['email']))->lockForUpdate()->first();
+            if (! Hash::check($data['password'], $user?->password ?? '$2y$12$GMxmZYsWIMmOWUzC7f8CHuCAine6ZDgObGtiAdy/vjdYcwsKb.aMe') || ! $user) {
+                throw ValidationException::withMessages(['email' => 'The credentials are invalid.']);
+            }
 
-        return DB::transaction(function () use ($user): array {
             $token = $user->createToken('pos')->plainTextToken;
             AuditTrail::record($user, 'auth.login');
 
@@ -37,7 +37,11 @@ class AuthController
     public function forgot(Request $request)
     {
         $data = $request->validate(['email' => 'required|email|max:255']);
-        Password::sendResetLink(['email' => strtolower($data['email'])]);
+        $email = strtolower($data['email']);
+        DB::transaction(function () use ($email): void {
+            User::where('email', $email)->lockForUpdate()->first();
+            Password::sendResetLink(['email' => $email]);
+        });
 
         return response()->json(['message' => 'If the account exists, a reset link will be sent.'], 202);
     }
