@@ -25,7 +25,7 @@ class AuditMutation
                     throw new HttpResponseException($response);
                 }
                 if ($request->attributes->get('audit_replay', false)
-                    || ($response->getStatusCode() === 200 && in_array($action, ['sale.checkout', 'payment.create', 'credit.repay'], true))) {
+                    || ($response->getStatusCode() === 200 && in_array($action, ['sale.checkout', 'payment.create', 'credit.repay', 'subscription.invoice.create'], true))) {
                     return $response;
                 }
 

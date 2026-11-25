@@ -11,10 +11,14 @@ use App\Http\PaymentsController;
 use App\Http\PurchasesController;
 use App\Http\ReportsController;
 use App\Http\SalesController;
+use App\Http\SubscriptionController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
+    Route::post('billing/mpesa/callback', [SubscriptionController::class, 'callback'])
+        ->middleware('throttle:120,1,mpesa-callback:');
+
     Route::middleware('throttle:10,1')->group(function (): void {
         Route::post('auth/login', [AuthController::class, 'login']);
         Route::post('auth/forgot-password', [AuthController::class, 'forgot']);
@@ -64,6 +68,26 @@ Route::prefix('v1')->group(function (): void {
             Route::get('analytics', [ReportsController::class, 'index']);
             Route::get('reports', [ReportsController::class, 'index']);
             Route::get('dashboard', [ReportsController::class, 'index']);
+        });
+
+        Route::prefix('billing')->group(function (): void {
+            Route::get('plans', [SubscriptionController::class, 'plans']);
+            Route::post('plans', [SubscriptionController::class, 'savePlan'])
+                ->middleware(AuditMutation::class.':subscription.plan.create,subscription_plan');
+            Route::patch('plans/{id}', [SubscriptionController::class, 'savePlan'])
+                ->whereNumber('id')->middleware(AuditMutation::class.':subscription.plan.update,subscription_plan');
+            Route::get('subscription', [SubscriptionController::class, 'status']);
+            Route::get('invoices/{id?}', [SubscriptionController::class, 'invoices'])->whereNumber('id');
+            Route::post('invoices', [SubscriptionController::class, 'invoice'])
+                ->middleware(AuditMutation::class.':subscription.invoice.create,subscription_invoice');
+            Route::post('invoices/{id}/cancel', [SubscriptionController::class, 'cancel'])
+                ->whereNumber('id')->middleware(AuditMutation::class.':subscription.invoice.cancel,subscription_invoice');
+            Route::post('invoices/{invoice}/mpesa', [SubscriptionController::class, 'start'])
+                ->whereNumber('invoice')->middleware('throttle:5,1,mpesa-start:');
+            Route::post('payments/{attempt}/reconcile', [SubscriptionController::class, 'reconcile'])
+                ->whereNumber('attempt')->middleware('throttle:15,1,mpesa-reconcile:');
+            Route::get('reconciliation', [SubscriptionController::class, 'reconciliation']);
+            Route::post('reconciliation/{attempt}/close-review', [SubscriptionController::class, 'closeReview'])->whereNumber('attempt');
         });
 
         $directories = ['branches', 'customers', 'products', 'suppliers', 'expenses'];
