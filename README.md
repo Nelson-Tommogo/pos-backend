@@ -4,6 +4,20 @@ Laravel 13 and PostgreSQL REST API for the Northstar Nuxt point-of-sale workspac
 
 See [POS architecture](docs/architecture.md) for domain boundaries, analytics definitions, and the roadmap for register shifts, returns, and provider integrations.
 
+## Contents
+
+- [Run locally](#run-locally)
+- [First sale walkthrough](#first-sale-walkthrough)
+- [Connect Nuxt](#connect-nuxt)
+- [Roles and permissions](#roles-and-permissions)
+- [API routes](#api-routes)
+- [Analytics filters](#analytics-filters)
+- [Bulk imports](#bulk-imports)
+- [Audit trail](#audit-trail)
+- [Checkout](#checkout)
+- [Deploy and operate](#deploy-and-operate)
+- [Troubleshooting](#troubleshooting)
+
 ## Run locally
 
 Install PHP 8.4.1 or later with the Composer platform extensions, including `pdo_pgsql`, `simplexml`, and `zip`. Start PostgreSQL and create an empty database and an application login. For example, from a terminal where `psql -d postgres` connects as a PostgreSQL administrator:
@@ -14,24 +28,87 @@ CREATE ROLE northstar LOGIN;
 CREATE DATABASE northstar OWNER northstar;
 ```
 
-Run the following in the backend directory. Set the connection credentials in `.env` before migrating.
+Run these in the backend directory. Preserve an existing `.env`.
 
 ```bash
 composer install
-cp .env.example .env
-php artisan key:generate
+composer check-platform-reqs
+test -f .env || cp .env.example .env
+```
+
+Set `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD` in `.env`. Keep `DB_CONNECTION=pgsql`. Generate the application key once per environment. Then apply the schema and start the server.
+
+```bash
+php artisan key:generate  # Skip if APP_KEY is already set.
 php artisan migrate
-php artisan pos:platform-admin alex@northstar.store --demo
 php artisan serve
 ```
 
-The demo login is `alex@northstar.store` with password `password123` in local and testing environments. For a regular installation, run `php artisan pos:platform-admin you@example.com` and enter a password at the prompt. The health endpoint is `GET http://localhost:8000/up`. Business records start empty.
+Open `http://localhost:8000/up` to check that Laravel boots. Use `php artisan migrate:status` and a request to the API to verify the database connection.
 
-Set `FRONTEND_URL` to the Nuxt origin. It configures CORS and the link in email invitations and password resets. Local mail uses the log transport. For email delivery, set `MAIL_MAILER=smtp`, the `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SCHEME`, and a valid `MAIL_FROM_ADDRESS`. Allow at least 5 MB for PHP file uploads and enough request size for multipart form data.
+In another terminal, bootstrap a super admin using one of these commands.
+
+```bash
+# Local or testing only. Password is password123.
+php artisan pos:platform-admin alex@northstar.store --demo
+
+# Regular account. The command prompts for a password.
+php artisan pos:platform-admin you@example.com
+```
+
+Set `FRONTEND_URL` to the exact Nuxt origin, such as `http://localhost:3000`. It configures CORS and the destination of invitation and reset links. In local development, messages are written to the Laravel log. To deliver them, configure `MAIL_MAILER=smtp`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SCHEME`, and `MAIL_FROM_ADDRESS`. Allow at least 5 MB for individual uploads in PHP and allow multipart overhead in the PHP and reverse proxy request size limits.
+
+## First sale walkthrough
+
+Run this in Bash with `curl` and `jq` against a local development database with the demo super admin. The sample creates a new shop and sample records each time.
+
+```bash
+set -euo pipefail
+
+API=http://127.0.0.1:8000/api/v1
+STAMP=$(date +%s)
+ADMIN_EMAIL="admin-${STAMP}@example.com"
+ADMIN_PASSWORD='LocalOnly-Demo-123!'
+JSON=(-H 'Accept: application/json' -H 'Content-Type: application/json')
+
+SUPER_TOKEN=$(curl -fsS "${JSON[@]}" "$API/auth/login" \
+  -d '{"email":"alex@northstar.store","password":"password123"}' | jq -er '.token')
+
+SHOP_ID=$(curl -fsS "${JSON[@]}" -H "Authorization: Bearer $SUPER_TOKEN" "$API/shops" \
+  -d "$(jq -n --arg email "$ADMIN_EMAIL" --arg password "$ADMIN_PASSWORD" \
+    '{shop_name:"Northstar Demo",name:"Shop Administrator",email:$email,password:$password}')" | jq -er '.shop_id')
+
+ADMIN_TOKEN=$(curl -fsS "${JSON[@]}" "$API/auth/login" \
+  -d "$(jq -n --arg email "$ADMIN_EMAIL" --arg password "$ADMIN_PASSWORD" \
+    '{email:$email,password:$password}')" | jq -er '.token')
+AUTH=(-H "Authorization: Bearer $ADMIN_TOKEN")
+
+BRANCH_ID=$(curl -fsS "${JSON[@]}" "${AUTH[@]}" "$API/branches" \
+  -d '{"name":"Main Branch"}' | jq -er '.id')
+PRODUCT_ID=$(curl -fsS "${JSON[@]}" "${AUTH[@]}" "$API/products" \
+  -d '{"name":"Tea","sku":"TEA-001","barcode":"0012345","price_minor":15000,"cost_minor":9000}' | jq -er '.id')
+
+curl -fsS "${JSON[@]}" "${AUTH[@]}" "$API/inventory/adjustments" \
+  -d "$(jq -n --argjson branch "$BRANCH_ID" --argjson product "$PRODUCT_ID" \
+    '{branch_id:$branch,product_id:$product,delta:10,note:"Opening count"}')" | jq
+
+CHECKOUT_KEY=$(php -r 'require "vendor/autoload.php"; echo Illuminate\Support\Str::uuid();')
+SALE_ID=$(curl -fsS "${JSON[@]}" "${AUTH[@]}" "$API/sales/checkout" \
+  -d "$(jq -n --arg key "$CHECKOUT_KEY" --argjson branch "$BRANCH_ID" --argjson product "$PRODUCT_ID" \
+    '{idempotency_key:$key,branch_id:$branch,items:[{product_id:$product,quantity:2}],method:"cash"}')" | jq -er '.id')
+
+curl -fsS "${JSON[@]}" "${AUTH[@]}" "$API/receipts/$SALE_ID" | jq
+curl -fsS "${JSON[@]}" "${AUTH[@]}" "$API/analytics?branch_id=$BRANCH_ID" | jq
+curl -fsS "${JSON[@]}" "${AUTH[@]}" "$API/audit-events?action=sale.checkout&subject_id=$SALE_ID" | jq
+
+printf 'Shop %s, branch %s, receipt %s\n' "$SHOP_ID" "$BRANCH_ID" "$SALE_ID"
+```
+
+Expected results are 8 units remaining, a KES 300 receipt at the default zero tax rate, and one checkout audit event with the sale ID. Analytics reports KES 120 estimated gross profit for the sample sale. Use the returned IDs for subsequent requests.
 
 ## Connect Nuxt
 
-Use `http://localhost:8000/api/v1` as the local API base. Send `Accept: application/json` and include `Authorization: Bearer <token>` on authenticated requests. JSON writes use `Content-Type: application/json`. The API returns JSON validation errors as `422` and uses `401` for missing or expired authentication, `403` for forbidden operations, and `404` for unavailable records. Lists use Laravel's paginator with records in `data` and metadata that includes `current_page`, `last_page`, and `total`.
+Use `http://localhost:8000/api/v1` as the local API base. Send `Accept: application/json` and include `Authorization: Bearer <token>` on authenticated requests. JSON writes use `Content-Type: application/json`. The API returns JSON validation errors as `422` and uses `401` for missing or expired authentication, `403` for forbidden operations, and `404` for unavailable records. Most lists return 50 records per page in `data`, along with pagination metadata such as `current_page`, `last_page`, and `total`. The audit trail uses simple pagination with next and previous links.
 
 1. Call `POST /auth/login` with `email` and `password`. The response includes `user` and a bearer token valid for 12 hours.
 2. As the super admin, call `POST /shops` with `shop_name`, `name`, `email`, and `password`. To add an administrator to an existing shop, call `POST /shops/{shop}/administrators` with `name`, `email`, and `password`. The API assigns the `administrator` role from the route and uses the shop in the URL.
@@ -39,6 +116,19 @@ Use `http://localhost:8000/api/v1` as the local API base. Send `Accept: applicat
 4. Use `POST /auth/forgot-password` with `email` and `POST /auth/reset-password` with `email`, `token`, `password`, and `password_confirmation`. The reset revokes active tokens. `POST /auth/logout` revokes the current token.
 
 The Nuxt starter's local-storage workflows still require wiring to these endpoints. Camera scanning and printer dialogs stay in the browser. M-Pesa, card, and bank transfer are recorded as payment methods. Payment provider integration and printer hardware bridges are outside this implementation.
+
+## Roles and permissions
+
+| Role | Scope | Main responsibilities |
+| --- | --- | --- |
+| Super admin (`platform_admin`) | Platform | List and onboard shops, create shop administrators, and view platform-administrator audit activity. |
+| Shop administrator (`administrator`) | Entire shop | Perform all shop operations across branches, manage roles and access, set credit limits and settings, and review shop audit history. |
+| Branch manager (`branch_manager`) and store manager (`store_manager`) | Assigned branch | Checkout, stock operations, purchasing, branch staff visibility, finance, and analytics. |
+| Cashier (`cashier`) and teller (`teller`) | Assigned branch | Checkout, sales and receipts, product lookup, and customer entry. |
+| Accountant (`accountant`) | Assigned branch | Sales and receipts, purchase visibility, expenses, payments, and analytics. |
+| Stock clerk (`stock_clerk`) | Assigned branch | Products, suppliers, inventory adjustments, and purchasing. |
+
+Each non-administrator shop account requires one branch. Cross-branch transfers, credit limit changes, and credit repayments are shop administrator operations. Catalog and directory records are shared within the shop according to the applicable role permissions. Branch-scoped operations stay within the assigned branch.
 
 ## API routes
 
@@ -60,8 +150,6 @@ Routes below are relative to `/api/v1`.
 | Settings | `GET /settings`, `PATCH /settings` for `name`, `currency`, `tax_bps`, and `receipt` fields `name`, `address`, `phone`, `footer`, and `accent`. `PATCH /preferences` accepts `theme`, `paper_mm` (58, 80, or 210), and `print_after_checkout`. |
 
 A branch takes `name` and optional `address`. Products take `name`, `sku`, `price_minor`, `cost_minor`, and optional `barcode`, `category`, and `variant`. Suppliers and customers take `name` and optional `email`, `phone`, and `address`. Administrators can set `credit_limit_minor` on customers. Expenses take `branch_id`, `description`, `amount_minor`, and `incurred_on` as `YYYY-MM-DD`.
-
-Shop roles are `administrator`, `branch_manager`, `store_manager`, `cashier`, `teller`, `accountant`, and `stock_clerk`. Shop administrators can perform all shop operations, including staff management, checkout, inventory, finance, and viewing their shop audit trail. Super admins provision shops and administrators at the platform level. Each other role requires one branch. Managers and stock clerks can operate inventory, and administrators initiate cross-branch transfers. Administrators, managers, cashiers, and tellers can check out sales. Administrators, managers, and accountants can access financial reports and the payment ledger.
 
 ### Analytics filters
 
@@ -89,6 +177,16 @@ The analytics routes return the sales totals, daily sales, payment mix, cashier 
 
 Download the matching template at `GET /api/v1/{resource}/template`. Upload UTF-8 CSV or XLSX using multipart field `file` at `POST /api/v1/{resource}/import`. Imports create records in the authenticated shop, with a 5 MB file limit, a 500-record limit, and validation before the transaction commits. Customer and user imports require a shop administrator. Supplier and product imports require stock-management permissions. Use audited stock, purchase, and checkout operations for changes that post financial or stock movements.
 
+Using the API and authorization variables from the walkthrough:
+
+```bash
+curl -fsS "${AUTH[@]}" "$API/products/template" -o products-template.csv
+curl -fsS -H 'Accept: application/json' "${AUTH[@]}" "$API/products/import" \
+  -F 'file=@products.csv'
+```
+
+Save the populated template as `products.csv` before uploading. Keep identifiers such as SKUs and barcodes as text in spreadsheets so leading zeros survive. For XLSX, put the header and values on the first worksheet. Use invitation links for individual account setup.
+
 ### Audit trail
 
 Run `php artisan migrate` to create the audit table. Audit events record successful sign-ins, sign-outs, password resets, shop onboarding, user changes, directory changes, imports, inventory operations, purchases, checkout, payments, repayments, and settings changes from that point forward. Business mutations and their audit entries commit together. Retrying a completed checkout, repayment, payment, or goods receipt leaves one event for the committed operation.
@@ -114,6 +212,33 @@ Example `POST /api/v1/sales/checkout` body:
 }
 ```
 
-Use `cash`, `mpesa`, `card`, `bank_transfer`, or `credit`. Credit requires `customer_id`. Optional `customer` fields are `name`, `phone`, and `email`; `reference` can store a payment reference. The backend calculates totals from the shop's prices and tax settings. It commits the sale, stock movements, credit balance, and payment together. An identical retry by the same user returns the existing sale or payment. Reusing the key for a different request returns `409`.
+Use `cash`, `mpesa`, `card`, `bank_transfer`, or `credit`. Credit requires `customer_id`. Optional `customer` fields are `name`, `phone`, and `email`. Use `reference` for a payment reference. The backend calculates totals from the shop's prices and tax settings. It commits the sale, stock movements, credit balance, and payment together. An identical retry by the same user returns the existing sale or payment. Reusing the key for a different request returns `409`.
 
-For browser production deployments, serve the API over HTTPS and point the web server document root at `public/`. Configure a shared rate-limit cache for multiple application instances.
+## Deploy and operate
+
+1. Serve Laravel over HTTPS with the web root at `public/`. Set `APP_ENV=production`, `APP_DEBUG=false`, and the real `APP_URL` and `FRONTEND_URL`. Store `APP_KEY`, database credentials, and mail credentials in the environment's secret store.
+2. Run `composer install --no-dev --optimize-autoloader` during the build. Run `php artisan migrate --force` with the schema migration account during deployment, then cache configuration and routes. Keep `storage/` and `bootstrap/cache/` writable by the runtime. Use the non-owner application role described in [Audit trail](#audit-trail) for API traffic.
+3. Configure shared rate-limit storage for multiple API instances and set up SMTP for staff invitations and password resets. Verify the origin, invitation link, sign-in, and receipt printing on the intended register devices.
+4. Back up PostgreSQL regularly and test restoring both business and audit tables. Monitor checkout errors, database lock waits, disk usage, and mail delivery. Confirm applicable fiscal invoicing requirements before going live. The current backend records tenders and prints receipt data through the frontend. Live settlement, returns, split tenders, register shifts, and eTIMS integration are covered in the [architecture roadmap](docs/architecture.md).
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Could not connect to PostgreSQL | Confirm the service is running and the host, port, database, username, and password agree with `.env`. Run `php artisan migrate:status`. Clear cached configuration with `php artisan config:clear` after changing local settings. |
+| `401` on an authenticated request | Check the bearer header. Sign in again if the token expired, the user signed out, or their credential or access change revoked the token. |
+| `403` or `404` on a shop operation | Confirm the role and assigned branch through `GET /me`. Use IDs from the authenticated shop. |
+| `409` during checkout or repayment | Compare the submitted payload with the original request for that UUID. Reuse the UUID for an identical retry and create a new UUID for a new transaction. |
+| `422` during checkout or import | Read the JSON `errors` object. Check stock and available credit for checkout, or compare upload headers and reported rows with the template. |
+| `429` on repeated calls | Wait for the rate-limit window, using `Retry-After` when returned. Debounce dashboard filters and avoid parallel upload retries. |
+| Browser blocks a request | Confirm `FRONTEND_URL` exactly matches the browser origin, including scheme and port. |
+| Invitation or reset email is missing | Look in the local Laravel log when using the log mailer. With SMTP, verify transport configuration and sender delivery. |
+
+Useful commands for checking the running version and routes:
+
+```bash
+php artisan about
+php artisan route:list --path=api/v1
+php artisan migrate:status
+composer audit
+```
