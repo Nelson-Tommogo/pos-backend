@@ -35,6 +35,7 @@ CREATE TABLE users (
     remember_token varchar(100),
     created_at timestamptz,
     updated_at timestamptz,
+    UNIQUE (shop_id, id),
     FOREIGN KEY (shop_id, branch_id) REFERENCES branches (shop_id, id),
     CHECK (
         (role = 'platform_admin' AND shop_id IS NULL AND branch_id IS NULL)
@@ -108,7 +109,7 @@ CREATE TABLE sales (
     id bigserial PRIMARY KEY,
     shop_id bigint NOT NULL REFERENCES shops,
     branch_id bigint NOT NULL,
-    user_id bigint NOT NULL REFERENCES users,
+    user_id bigint NOT NULL,
     customer_id bigint,
     customer jsonb,
     idempotency_key uuid NOT NULL,
@@ -122,6 +123,8 @@ CREATE TABLE sales (
     items jsonb NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (shop_id, idempotency_key),
+    UNIQUE (shop_id, branch_id, id),
+    FOREIGN KEY (shop_id, user_id) REFERENCES users (shop_id, id),
     FOREIGN KEY (shop_id, branch_id) REFERENCES branches (shop_id, id),
     FOREIGN KEY (shop_id, customer_id) REFERENCES customers (shop_id, id)
 );
@@ -142,12 +145,13 @@ CREATE TABLE stock_movements (
     shop_id bigint NOT NULL,
     branch_id bigint NOT NULL,
     product_id bigint NOT NULL,
-    user_id bigint NOT NULL REFERENCES users,
+    user_id bigint NOT NULL,
     delta integer NOT NULL CHECK (delta <> 0),
     reason varchar(32) NOT NULL,
     reference_id bigint,
     note varchar(255),
     created_at timestamptz NOT NULL DEFAULT now(),
+    FOREIGN KEY (shop_id, user_id) REFERENCES users (shop_id, id),
     FOREIGN KEY (shop_id, branch_id, product_id) REFERENCES inventory (shop_id, branch_id, product_id)
 );
 CREATE INDEX ON stock_movements (shop_id, branch_id, id);
@@ -164,14 +168,21 @@ CREATE TABLE payments (
     id bigserial PRIMARY KEY,
     shop_id bigint NOT NULL REFERENCES shops,
     branch_id bigint NOT NULL,
-    user_id bigint NOT NULL REFERENCES users,
-    sale_id bigint REFERENCES sales,
+    user_id bigint NOT NULL,
+    sale_id bigint,
+    idempotency_key uuid,
     customer_id bigint,
     method varchar(20) NOT NULL CHECK (method IN ('cash','mpesa','card','bank_transfer','credit')),
     kind varchar(20) NOT NULL CHECK (kind IN ('sale','repayment','manual')),
     amount_minor bigint NOT NULL CHECK (amount_minor >= 0),
     reference varchar(160),
     created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (shop_id, idempotency_key),
+    CHECK ((kind = 'sale') = (sale_id IS NOT NULL)),
+    CHECK ((kind = 'sale') = (idempotency_key IS NULL)),
+    CHECK (kind <> 'repayment' OR customer_id IS NOT NULL),
+    FOREIGN KEY (shop_id, user_id) REFERENCES users (shop_id, id),
+    FOREIGN KEY (shop_id, branch_id, sale_id) REFERENCES sales (shop_id, branch_id, id),
     FOREIGN KEY (shop_id, branch_id) REFERENCES branches (shop_id, id),
     FOREIGN KEY (shop_id, customer_id) REFERENCES customers (shop_id, id)
 );

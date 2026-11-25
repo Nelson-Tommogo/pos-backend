@@ -45,8 +45,10 @@ class AuthController
             'password' => ['required', 'string', 'min:12', 'regex:/\\A[^\\x00]{1,72}\\z/', 'confirmed'],
         ]);
         $data['email'] = strtolower($data['email']);
-        $result = Password::reset($data, function (User $user, string $password): void {
-            DB::transaction(function () use ($user, $password): void {
+        $result = DB::transaction(function () use ($data) {
+            User::where('email', $data['email'])->lockForUpdate()->first();
+
+            return Password::reset($data, function (User $user, string $password): void {
                 $user->update(['password' => $password]);
                 $user->tokens()->delete();
             });
