@@ -49,7 +49,7 @@ Routes below are relative to `/api/v1`.
 | Onboarding | `GET /shops`, `POST /shops` for platform administrators |
 | Staff | `GET /team[/{id}]`, `GET /users[/{id}]`, `POST /users`, `PATCH /users/{id}`. User fields are `name`, `email`, `password`, `role`, and `branch_id`. Use `POST /users/invitations` with the same fields except `password` to send a password-setup link. |
 | Directories | `GET /{resource}[/{id}]`, `POST /{resource}`, `PATCH /{resource}/{id}` for `branches`, `products`, `customers`, `suppliers`, and `expenses`. Lists accept `q`. Products also accept exact `barcode` lookup. |
-| Imports | `GET /{resource}/template`, `POST /{resource}/import` for `products` and `users`. Upload multipart field `file` as CSV or XLSX. Import reads the first worksheet, with one header row and at most 500 records and 5 MB. The entire import rolls back on a row error. |
+| Imports | `GET /{resource}/template`, `POST /{resource}/import` for `products`, `users`, `customers`, and `suppliers`. Upload multipart field `file` as CSV or XLSX. Import reads the first worksheet, with one header row and at most 500 records and 5 MB. The entire import rolls back on a row error. |
 | Inventory | `GET /inventory` accepts `branch_id`, `product_id`, and `low_stock=1`. `GET /inventory/{branch}/{product}` reads a balance. `PUT` on that route sets `reorder_level`. |
 | Movements | `GET /inventory/movements`. `POST /inventory/adjustments` takes `branch_id`, `product_id`, signed `delta`, and `note`. `POST /inventory/transfers` takes `from_branch_id`, `to_branch_id`, `product_id`, `quantity`, and optional `note`. |
 | Purchases | `GET /purchases[/{id}]`, `POST /purchases`, `PATCH /purchases/{id}`. Send `branch_id`, `supplier_id`, and `items` with `product_id`, `quantity`, and `cost_minor`. `POST /purchases/{id}/receive` receives the full order and can be retried. Received orders are locked. |
@@ -62,9 +62,31 @@ A branch takes `name` and optional `address`. Products take `name`, `sku`, `pric
 
 Shop roles are `administrator`, `branch_manager`, `store_manager`, `cashier`, `teller`, `accountant`, and `stock_clerk`. Shop administrators have shop-wide access. Each other role requires one branch. Managers and stock clerks can operate inventory, and administrators initiate cross-branch transfers. Administrators, managers, cashiers, and tellers can check out sales. Administrators, managers, and accountants can access financial reports and the payment ledger.
 
+### Analytics filters
+
+Use `GET /api/v1/analytics` for combined sales, purchases, and financial data.
+
+| Filter | Behavior |
+| --- | --- |
+| `from`, `to` | Inclusive local dates in `YYYY-MM-DD` format. |
+| `from_at`, `to_at` | Exact timestamps with seconds and a numeric UTC offset. The first is inclusive and the second is exclusive. Supply both for analytics and use them in place of `from` and `to`. |
+| `timezone` | IANA timezone for daily buckets and local business dates. Defaults to `Africa/Nairobi`. |
+| `branch_id` | Filters all sections to an authorized branch. |
+| `salesperson_id`, `customer_id`, `product_id`, `payment_method` | Combine to filter completed receipts and their tenders. Product filtering selects whole receipts containing the product. Customer filtering also applies to credit repayments. |
+
+`GET /sales` and `GET /receipts` list routes also support date or timestamp bounds, timezone, branch, salesperson, customer, product, and payment-method filters. Purchases and expenses follow the branch and reporting period. Expenses are stored by local date, including when the report uses exact timestamps. Inventory shows current branch balances.
+
+```text
+GET /api/v1/analytics?from=2026-11-01&to=2026-11-25&branch_id=1&salesperson_id=42&payment_method=mpesa
+```
+
 ### Analytics response
 
 The analytics routes return the sales totals, daily sales, payment mix, cashier totals, and inventory summaries. `financial_summary` adds pre-tax sales, tax, estimated cost, recorded expenses, credit sales, and credit repayments. `top_products` returns up to 20 product IDs ranked by pre-tax sales with units sold. `purchases` includes orders placed during the period, orders received during the period, and the total cost of received items in minor units. Receiving costs are tracked separately from the sale-time costs used to estimate gross profit. The date range filters financial activity. Stock summaries report current balances.
+
+### Bulk imports
+
+Download the matching template at `GET /api/v1/{resource}/template`. Upload UTF-8 CSV or XLSX using multipart field `file` at `POST /api/v1/{resource}/import`. Imports create records in the authenticated shop, with a 5 MB file limit, a 500-record limit, and validation before the transaction commits. Customer and user imports require a shop administrator. Supplier and product imports require stock-management permissions. Use audited stock, purchase, and checkout operations for changes that post financial or stock movements.
 
 ## Checkout
 

@@ -47,7 +47,7 @@ Retail order APIs commonly represent line items, modifiers, taxes and adjustment
 
 ## Analytics contract
 
-`GET /api/v1/analytics`, `GET /api/v1/reports`, and `GET /api/v1/dashboard` expose the same finance-authorized dataset. Filter by inclusive date range, reporting timezone, and authorized branch. Sales and payments use UTC instants mapped to local day boundaries. Expenses use their recorded business date. Inventory metrics describe current stock, independent of the date range.
+`GET /api/v1/analytics`, `GET /api/v1/reports`, and `GET /api/v1/dashboard` expose the same finance-authorized dataset. Filter by inclusive local dates or an exact half-open timestamp range, reporting timezone, and authorized branch. Sales and their tenders can also be filtered by salesperson, customer, product, and payment method. Product filters select whole receipts. Customer filters also scope repayments. Sales and payments use UTC instants mapped to local day boundaries. Expenses use their recorded business date. Inventory metrics describe current stock, independent of the date range.
 
 | Metric | Definition |
 | --- | --- |

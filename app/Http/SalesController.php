@@ -2,6 +2,7 @@
 
 namespace App\Http;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -19,16 +20,35 @@ class SalesController
 
         $filters = $request->validate([
             'branch_id' => 'sometimes|required|integer',
+            'from' => 'sometimes|required|date_format:Y-m-d',
+            'to' => 'sometimes|required|date_format:Y-m-d',
+            'timezone' => 'sometimes|required|timezone',
             'from_at' => 'sometimes|required|date_format:Y-m-d\TH:i:sP',
-            'to_at' => 'sometimes|required|date_format:Y-m-d\TH:i:sP|after:from_at',
+            'to_at' => 'sometimes|required|date_format:Y-m-d\TH:i:sP',
         ] + SaleFilters::rules($workspace));
         if (isset($filters['branch_id'])) {
             $query->where('branch_id', $workspace->branch($filters['branch_id']));
         }
-        foreach (['from_at' => '>=', 'to_at' => '<'] as $filter => $operator) {
-            if (isset($filters[$filter])) {
-                $query->where('created_at', $operator, \Carbon\CarbonImmutable::parse($filters[$filter])->utc());
-            }
+        $hasDates = isset($filters['from']) || isset($filters['to']);
+        $hasTimes = isset($filters['from_at']) || isset($filters['to_at']);
+        if ($hasDates && $hasTimes) {
+            throw ValidationException::withMessages(['from_at' => 'Use date filters or timestamp filters.']);
+        }
+        $zone = $filters['timezone'] ?? 'Africa/Nairobi';
+        $start = isset($filters['from_at'])
+            ? CarbonImmutable::parse($filters['from_at'])
+            : (isset($filters['from']) ? CarbonImmutable::parse($filters['from'], $zone)->startOfDay() : null);
+        $end = isset($filters['to_at'])
+            ? CarbonImmutable::parse($filters['to_at'])
+            : (isset($filters['to']) ? CarbonImmutable::parse($filters['to'], $zone)->startOfDay()->addDay() : null);
+        if ($start !== null && $end !== null && $end <= $start) {
+            throw ValidationException::withMessages([$hasTimes ? 'to_at' : 'to' => 'The end must follow the start.']);
+        }
+        if ($start !== null) {
+            $query->where('created_at', '>=', $start->utc());
+        }
+        if ($end !== null) {
+            $query->where('created_at', '<', $end->utc());
         }
         SaleFilters::apply($query, $filters, $workspace);
 
