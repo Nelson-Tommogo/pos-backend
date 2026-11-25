@@ -13,7 +13,7 @@ Artisan::command('pos:platform-admin {email} {--demo}', function (): int {
     $password = $this->option('demo') ? 'password123' : $this->secret('Platform administrator password');
     validator(['email' => $email, 'password' => $password], [
         'email' => 'required|email|max:255|unique:users',
-        'password' => $this->option('demo') ? 'required' : 'required|string|min:12|max:72',
+        'password' => $this->option('demo') ? 'required' : ['required', 'string', 'min:12', 'regex:/\\A[^\\x00]{1,72}\\z/'],
     ])->validate();
     User::create(['name' => 'Platform Administrator', 'email' => $email, 'password' => $password, 'role' => 'platform_admin']);
     $this->info('Platform administrator created.');

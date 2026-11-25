@@ -3,8 +3,10 @@
     "description": "Northstar point-of-sale API",
     "type": "project",
     "require": {
-        "php": "^8.3",
+        "php": "^8.4.1",
         "ext-pdo_pgsql": "*",
+        "ext-simplexml": "*",
+        "ext-zip": "*",
         "laravel/framework": "^13.0",
         "laravel/sanctum": "^4.0"
     },

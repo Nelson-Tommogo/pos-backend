@@ -28,6 +28,8 @@ Route::prefix('v1')->group(function (): void {
         Route::patch('settings', [AdministrationController::class, 'updateSettings']);
         Route::patch('preferences', [AdministrationController::class, 'preferences']);
         Route::get('team/{id?}', [AdministrationController::class, 'team'])->whereNumber('id');
+        Route::get('users/{id?}', [AdministrationController::class, 'team'])->whereNumber('id');
+        Route::post('users/invitations', [AdministrationController::class, 'invite'])->middleware('throttle:10,1');
         Route::post('users', [AdministrationController::class, 'user']);
         Route::patch('users/{id}', [AdministrationController::class, 'user'])->whereNumber('id');
 

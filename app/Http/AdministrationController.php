@@ -5,6 +5,8 @@ namespace App\Http;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -25,7 +27,7 @@ class AdministrationController
             'shop_name' => 'required|string|max:160',
             'name' => 'required|string|max:160',
             'email' => 'required|email|max:255|unique:users',
-            'password' => 'required|string|min:12|max:72',
+            'password' => ['required', 'string', 'min:12', 'regex:/\\A[^\\x00]{1,72}\\z/'],
         ]);
 
         return DB::transaction(function () use ($data) {
@@ -51,17 +53,24 @@ class AdministrationController
     public function user(Request $request, Workspace $workspace, ?int $id = null)
     {
         $workspace->authorize(['administrator']);
-        $user = $id === null ? null : User::where('shop_id', $workspace->shop)->findOrFail($id);
         $data = $request->all();
-        if (array_key_exists('email', $data) && is_string($data['email'])) {
-            $data['email'] = strtolower($data['email']);
-        }
-
-        return DB::transaction(function () use ($workspace, $id, $user, $data) {
+        return DB::transaction(function () use ($workspace, $id, $data) {
+            $user = $id === null ? null : User::where('shop_id', $workspace->shop)->lockForUpdate()->findOrFail($id);
             $saved = $this->saveUser($workspace, $data, $user);
 
             return response()->json($saved, $id === null ? 201 : 200);
         });
+    }
+
+    public function invite(Request $request, Workspace $workspace)
+    {
+        $workspace->authorize(['administrator']);
+        $user = $this->saveUser($workspace, $request->only('name', 'email', 'role', 'branch_id') + [
+            'password' => Str::random(48),
+        ]);
+        Password::sendResetLink(['email' => $user->email]);
+
+        return response()->json($user, 201);
     }
 
     public function saveUser(Workspace $workspace, array $input, ?User $user = null): User
@@ -77,7 +86,7 @@ class AdministrationController
         $data = validator($input, [
             'name' => "$required|string|max:160",
             'email' => [$required, 'email', 'max:255', $email],
-            'password' => "$required|string|min:12|max:72",
+            'password' => [$required, 'string', 'min:12', 'regex:/\\A[^\\x00]{1,72}\\z/'],
             'role' => [$required, Rule::in(Workspace::ROLES)],
             'branch_id' => ['nullable', 'integer', $workspace->exists('branches')],
         ])->validate();
@@ -122,18 +131,18 @@ class AdministrationController
             'receipt.*' => 'nullable|string|max:255',
             'receipt.accent' => 'nullable|regex:/^#[0-9a-fA-F]{6}$/',
         ]);
-        if (isset($data['receipt'])) {
-            $data['receipt'] = json_encode($data['receipt'], JSON_THROW_ON_ERROR);
-        }
-
         DB::transaction(function () use ($workspace, $data): void {
             $shop = DB::table('shops')->where('id', $workspace->shop);
-            $current = $shop->lockForUpdate()->first();
+            $current = (clone $shop)->lockForUpdate()->first();
             if (isset($data['currency']) && $data['currency'] !== $current->currency
                 && ($workspace->records('sales')->exists() || $workspace->records('payments')->exists()
                     || $workspace->records('expenses')->exists() || $workspace->records('purchases')->exists()
                     || $workspace->records('products')->exists() || $workspace->records('customers')->where('credit_limit_minor', '>', 0)->exists())) {
                 throw ValidationException::withMessages(['currency' => 'Currency can only change before monetary records exist.']);
+            }
+            if (isset($data['receipt'])) {
+                $receipt = array_replace((array) json_decode($current->receipt), $data['receipt']);
+                $data['receipt'] = json_encode((object) $receipt, JSON_THROW_ON_ERROR);
             }
             if ($data !== []) {
                 $shop->update($data);
@@ -150,9 +159,11 @@ class AdministrationController
             'paper_mm' => 'sometimes|integer|in:58,80,210',
             'print_after_checkout' => 'sometimes|boolean',
         ]);
-        $user = $request->user();
-        $user->update(['preferences' => array_replace($user->preferences, $data)]);
+        return DB::transaction(function () use ($request, $data): object {
+            $user = User::lockForUpdate()->findOrFail($request->user()->id);
+            $user->update(['preferences' => (object) array_replace($user->preferences, $data)]);
 
-        return $user->preferences;
+            return (object) $user->preferences;
+        });
     }
 }

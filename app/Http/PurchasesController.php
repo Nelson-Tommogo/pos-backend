@@ -47,7 +47,7 @@ class PurchasesController
                 return response()->json($this->purchase($workspace->operations('purchases')->where('id', $newId)->firstOrFail()), 201);
             }
             $query = $workspace->operations('purchases')->where('id', $id);
-            $purchase = $query->lockForUpdate()->firstOrFail();
+            $purchase = (clone $query)->lockForUpdate()->firstOrFail();
             abort_if($purchase->received_at !== null, 409, 'The purchase has already been received.');
             if ($data !== []) {
                 $query->update($data);
@@ -63,7 +63,7 @@ class PurchasesController
 
         return DB::transaction(function () use ($workspace, $inventory, $id) {
             $query = $workspace->operations('purchases')->where('id', $id);
-            $purchase = $this->purchase($query->lockForUpdate()->firstOrFail());
+            $purchase = $this->purchase((clone $query)->lockForUpdate()->firstOrFail());
             if ($purchase->received_at === null) {
                 foreach ($purchase->items as $item) {
                     $inventory->move($workspace, $purchase->branch_id, $item->product_id, $item->quantity, 'purchase', $id);

@@ -77,12 +77,13 @@ class SalesController
                     'total_minor' => $lineTotal,
                 ];
             }
-            $tax = intdiv($subtotal * $shop->tax_bps + 5000, 10000);
+            $tax = intdiv($subtotal, 10000) * $shop->tax_bps
+                + intdiv(($subtotal % 10000) * $shop->tax_bps + 5000, 10000);
             $total = $subtotal + $tax;
             $customer = null;
             if (isset($data['customer_id'])) {
                 $query = $workspace->records('customers')->where('id', $data['customer_id']);
-                $customer = $query->lockForUpdate()->firstOrFail();
+                $customer = (clone $query)->lockForUpdate()->firstOrFail();
                 if ($data['method'] === 'credit') {
                     if ($customer->credit_limit_minor === 0 || $customer->balance_minor + $total > $customer->credit_limit_minor) {
                         throw ValidationException::withMessages(['customer_id' => 'The sale exceeds the available credit.']);

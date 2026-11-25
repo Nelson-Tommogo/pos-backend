@@ -56,7 +56,7 @@ class Workspace
 
     public function exists(string $table)
     {
-        return Rule::exists($table, 'id')->where($table.'.shop_id', $this->shop);
+        return Rule::exists($table, 'id')->where('shop_id', $this->shop);
     }
 
     public function settings(): object

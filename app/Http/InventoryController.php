@@ -84,6 +84,9 @@ class InventoryController
         ]);
         $from = $workspace->branch($data['from_branch_id']);
         $to = $workspace->branch($data['to_branch_id']);
+        if ($from === $to) {
+            throw ValidationException::withMessages(['to_branch_id' => 'Choose a different destination branch.']);
+        }
 
         DB::transaction(function () use ($workspace, $from, $to, $data): void {
             $out = $this->move($workspace, $from, $data['product_id'], -$data['quantity'], 'transfer_out', note: $data['note'] ?? null);
@@ -99,7 +102,7 @@ class InventoryController
         $key = $this->key($workspace, $branch, $product);
         DB::table('inventory')->insertOrIgnore($key);
         $query = DB::table('inventory')->where($key);
-        $quantity = $query->lockForUpdate()->first()->quantity + $delta;
+        $quantity = (clone $query)->lockForUpdate()->first()->quantity + $delta;
         if ($quantity < 0 || $quantity > 2147483647) {
             throw ValidationException::withMessages(['quantity' => "Stock for product $product would be outside the supported range."]);
         }

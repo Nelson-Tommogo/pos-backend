@@ -13,7 +13,7 @@ class AuthController
 {
     public function login(Request $request)
     {
-        $data = $request->validate(['email' => 'required|email|max:255', 'password' => 'required|string|max:255']);
+        $data = $request->validate(['email' => 'required|email|max:255', 'password' => ['required', 'string', 'regex:/\\A[^\\x00]{1,72}\\z/']]);
         $user = User::where('email', strtolower($data['email']))->first();
         if (! Hash::check($data['password'], $user?->password ?? '$2y$12$GMxmZYsWIMmOWUzC7f8CHuCAine6ZDgObGtiAdy/vjdYcwsKb.aMe') || ! $user) {
             throw ValidationException::withMessages(['email' => 'The credentials are invalid.']);
@@ -42,7 +42,7 @@ class AuthController
         $data = $request->validate([
             'email' => 'required|email|max:255',
             'token' => 'required|string|max:255',
-            'password' => 'required|string|min:12|max:72|confirmed',
+            'password' => ['required', 'string', 'min:12', 'regex:/\\A[^\\x00]{1,72}\\z/', 'confirmed'],
         ]);
         $data['email'] = strtolower($data['email']);
         $result = Password::reset($data, function (User $user, string $password): void {

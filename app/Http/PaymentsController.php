@@ -39,7 +39,7 @@ class PaymentsController
             DB::table('shops')->where('id', $workspace->shop)->lockForUpdate()->first();
             if ($customer !== null) {
                 $query = $workspace->records('customers')->where('id', $customer);
-                $account = $query->lockForUpdate()->firstOrFail();
+                $account = (clone $query)->lockForUpdate()->firstOrFail();
                 if ($data['amount_minor'] > $account->balance_minor) {
                     throw ValidationException::withMessages(['amount_minor' => 'Repayment exceeds the outstanding balance.']);
                 }
