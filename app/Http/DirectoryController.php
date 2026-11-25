@@ -17,7 +17,7 @@ class DirectoryController
         'expenses' => Workspace::FINANCE,
     ];
 
-    public function index(Request $request, Workspace $workspace, string $resource, ?int $id = null)
+    public function index(Request $request, Workspace $workspace, string $resource, ?int $id = null): \Illuminate\Pagination\LengthAwarePaginator|\Illuminate\Http\JsonResponse
     {
         $query = $this->query($workspace, $resource);
         if ($id !== null) {

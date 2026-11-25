@@ -68,7 +68,13 @@ class AdministrationController
         $user = $this->saveUser($workspace, $request->only('name', 'email', 'role', 'branch_id') + [
             'password' => Str::random(48),
         ]);
-        Password::sendResetLink(['email' => $user->email]);
+        DB::afterCommit(function () use ($user): void {
+            try {
+                Password::sendResetLink(['email' => $user->email]);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        });
 
         return response()->json($user, 201);
     }

@@ -19,7 +19,12 @@ class AuthController
             throw ValidationException::withMessages(['email' => 'The credentials are invalid.']);
         }
 
-        return ['user' => $user, 'token' => $user->createToken('pos')->plainTextToken];
+        return DB::transaction(function () use ($user): array {
+            $token = $user->createToken('pos')->plainTextToken;
+            AuditTrail::record($user, 'auth.login');
+
+            return ['user' => $user, 'token' => $token];
+        });
     }
 
     public function logout(Request $request)
@@ -51,6 +56,7 @@ class AuthController
             return Password::reset($data, function (User $user, string $password): void {
                 $user->update(['password' => $password]);
                 $user->tokens()->delete();
+                AuditTrail::record($user, 'auth.password_reset', 'user', $user->id);
             });
         });
         if ($result !== Password::PASSWORD_RESET) {

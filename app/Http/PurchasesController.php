@@ -57,11 +57,11 @@ class PurchasesController
         }, 3);
     }
 
-    public function receive(Workspace $workspace, InventoryController $inventory, int $id)
+    public function receive(Request $request, Workspace $workspace, InventoryController $inventory, int $id)
     {
         $workspace->authorize(Workspace::STOCK);
 
-        return DB::transaction(function () use ($workspace, $inventory, $id) {
+        return DB::transaction(function () use ($request, $workspace, $inventory, $id) {
             $query = $workspace->operations('purchases')->where('id', $id);
             $purchase = $this->purchase((clone $query)->lockForUpdate()->firstOrFail());
             if ($purchase->received_at === null) {
@@ -70,6 +70,8 @@ class PurchasesController
                 }
                 $query->update(['received_at' => now()]);
                 $purchase = $this->purchase($query->firstOrFail());
+            } else {
+                $request->attributes->set('audit_replay', true);
             }
 
             return response()->json($purchase);

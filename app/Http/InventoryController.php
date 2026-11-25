@@ -65,8 +65,10 @@ class InventoryController
         ]);
         $branch = $workspace->branch($data['branch_id']);
 
-        return DB::transaction(function () use ($workspace, $branch, $data) {
-            $this->move($workspace, $branch, $data['product_id'], $data['delta'], 'adjustment', note: $data['note']);
+        return DB::transaction(function () use ($request, $workspace, $branch, $data) {
+            $movement = $this->move($workspace, $branch, $data['product_id'], $data['delta'], 'adjustment', note: $data['note']);
+
+            $request->attributes->set('audit_details', ['movement_id' => $movement, 'delta' => (int) $data['delta']]);
 
             return $this->show($workspace, $branch, $data['product_id']);
         }, 3);
@@ -88,10 +90,18 @@ class InventoryController
             throw ValidationException::withMessages(['to_branch_id' => 'Choose a different destination branch.']);
         }
 
-        DB::transaction(function () use ($workspace, $from, $to, $data): void {
+        DB::transaction(function () use ($request, $workspace, $from, $to, $data): void {
             $out = $this->move($workspace, $from, $data['product_id'], -$data['quantity'], 'transfer_out', note: $data['note'] ?? null);
             $in = $this->move($workspace, $to, $data['product_id'], $data['quantity'], 'transfer_in', $out, $data['note'] ?? null);
             $workspace->records('stock_movements')->where('id', $out)->update(['reference_id' => $in]);
+            $request->attributes->set('audit_subject_id', (int) $data['product_id']);
+            $request->attributes->set('audit_branch_id', $from);
+            $request->attributes->set('audit_details', [
+                'movement_id' => $out,
+                'destination_movement_id' => $in,
+                'destination_branch_id' => $to,
+                'quantity' => (int) $data['quantity'],
+            ]);
         }, 3);
 
         return response()->noContent();
