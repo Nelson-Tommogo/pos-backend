@@ -9,7 +9,7 @@ use Illuminate\Validation\ValidationException;
 
 class SalesController
 {
-    public function index(Workspace $workspace, ?int $id = null)
+    public function index(Request $request, Workspace $workspace, ?int $id = null)
     {
         $workspace->authorize(array_unique([...Workspace::SALES, ...Workspace::FINANCE]));
         $query = $workspace->operations('sales');
@@ -17,8 +17,23 @@ class SalesController
             return response()->json($this->receipt($workspace, $query->where('id', $id)->firstOrFail()));
         }
 
+        $filters = $request->validate([
+            'branch_id' => 'sometimes|required|integer',
+            'from_at' => 'sometimes|required|date_format:Y-m-d\TH:i:sP',
+            'to_at' => 'sometimes|required|date_format:Y-m-d\TH:i:sP|after:from_at',
+        ] + SaleFilters::rules($workspace));
+        if (isset($filters['branch_id'])) {
+            $query->where('branch_id', $workspace->branch($filters['branch_id']));
+        }
+        foreach (['from_at' => '>=', 'to_at' => '<'] as $filter => $operator) {
+            if (isset($filters[$filter])) {
+                $query->where('created_at', $operator, \Carbon\CarbonImmutable::parse($filters[$filter])->utc());
+            }
+        }
+        SaleFilters::apply($query, $filters, $workspace);
+
         return $query->select('id', 'branch_id', 'user_id', 'customer_id', 'currency', 'subtotal_minor', 'tax_minor', 'total_minor', 'created_at')
-            ->orderByDesc('id')->paginate(50);
+            ->orderByDesc('id')->paginate(50)->withQueryString();
     }
 
     public function checkout(Request $request, Workspace $workspace, InventoryController $inventory, PaymentsController $payments)

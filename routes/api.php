@@ -33,8 +33,8 @@ Route::prefix('v1')->group(function (): void {
         Route::post('users', [AdministrationController::class, 'user']);
         Route::patch('users/{id}', [AdministrationController::class, 'user'])->whereNumber('id');
 
-        Route::get('{resource}/template', [ImportController::class, 'template'])->whereIn('resource', ['products', 'users']);
-        Route::post('{resource}/import', [ImportController::class, 'import'])->whereIn('resource', ['products', 'users']);
+        Route::get('{resource}/template', [ImportController::class, 'template'])->whereIn('resource', array_keys(ImportController::COLUMNS));
+        Route::post('{resource}/import', [ImportController::class, 'import'])->whereIn('resource', array_keys(ImportController::COLUMNS))->middleware('throttle:5,1,imports:');
 
         Route::get('inventory', [InventoryController::class, 'index']);
         Route::get('inventory/movements', [InventoryController::class, 'movements']);
@@ -55,9 +55,11 @@ Route::prefix('v1')->group(function (): void {
         Route::post('payments', [PaymentsController::class, 'save']);
         Route::get('credit-customers', [PaymentsController::class, 'creditCustomers']);
         Route::post('credit-customers/{customer}/repayments', [PaymentsController::class, 'save'])->whereNumber('customer');
-        Route::get('analytics', [ReportsController::class, 'index']);
-        Route::get('reports', [ReportsController::class, 'index']);
-        Route::get('dashboard', [ReportsController::class, 'index']);
+        Route::middleware('throttle:30,1,analytics:')->group(function (): void {
+            Route::get('analytics', [ReportsController::class, 'index']);
+            Route::get('reports', [ReportsController::class, 'index']);
+            Route::get('dashboard', [ReportsController::class, 'index']);
+        });
 
         $directories = ['branches', 'customers', 'products', 'suppliers', 'expenses'];
         Route::get('{resource}/{id?}', [DirectoryController::class, 'index'])->whereIn('resource', $directories)->whereNumber('id');

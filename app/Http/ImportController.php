@@ -10,8 +10,10 @@ use ZipArchive;
 
 class ImportController
 {
-    private const COLUMNS = [
+    public const COLUMNS = [
         'products' => ['name', 'sku', 'barcode', 'category', 'variant', 'price_minor', 'cost_minor'],
+        'customers' => ['name', 'email', 'phone', 'address', 'credit_limit_minor'],
+        'suppliers' => ['name', 'email', 'phone', 'address'],
         'users' => ['name', 'email', 'password', 'role', 'branch_id'],
     ];
 
@@ -51,11 +53,20 @@ class ImportController
                     }
                     $data = array_combine($headers, array_pad($row, count($headers), null));
                     $data = array_map(fn ($value) => $value === null || $value === '' ? null : $value, $data);
-                    if ($resource === 'products') {
-                        DB::table('products')->insert($directory->productData($workspace, $data) + ['shop_id' => $workspace->shop]);
-                    } else {
+                    if ($resource === 'users') {
                         $administration->saveUser($workspace, $data);
+
+                        continue;
                     }
+                    if ($resource === 'products') {
+                        $data = $directory->productData($workspace, $data);
+                    } else {
+                        if ($resource === 'customers' && ($data['credit_limit_minor'] ?? null) === null) {
+                            unset($data['credit_limit_minor']);
+                        }
+                        $data = validator($data, $directory->rules($workspace, $resource, null))->validate();
+                    }
+                    DB::table($resource)->insert($data + ['shop_id' => $workspace->shop]);
                 } catch (ValidationException $exception) {
                     $errors = [];
                     foreach ($exception->errors() as $field => $messages) {
@@ -176,6 +187,14 @@ class ImportController
 
     private function append(array &$rows, array $row): void
     {
+        if (count($row) > 7) {
+            $this->invalid('The file has too many columns.');
+        }
+        foreach ($row as $value) {
+            if ($value !== null && (strlen($value) > 1024 || str_contains($value, "\0") || ! mb_check_encoding($value, 'UTF-8'))) {
+                $this->invalid('Use UTF-8 text with at most 1024 bytes per field.');
+            }
+        }
         if (array_filter($row, fn ($value) => $value !== null && trim($value) !== '') === []) {
             return;
         }
@@ -190,7 +209,7 @@ class ImportController
 
     private function authorize(Workspace $workspace, string $resource): void
     {
-        $workspace->authorize($resource === 'users' ? ['administrator'] : Workspace::STOCK);
+        $workspace->authorize(in_array($resource, ['users', 'customers'], true) ? ['administrator'] : Workspace::STOCK);
     }
 
     private function invalid(string $message): never

@@ -119,7 +119,7 @@ class DirectoryController
         return $query;
     }
 
-    private function rules(Workspace $workspace, string $resource, ?int $id): array
+    public function rules(Workspace $workspace, string $resource, ?int $id): array
     {
         $required = $id === null ? 'required' : 'sometimes|required';
         $contact = [
