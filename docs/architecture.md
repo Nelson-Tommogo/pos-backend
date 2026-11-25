@@ -24,7 +24,7 @@ flowchart LR
 
 | Domain | Implemented | Target architecture |
 | --- | --- | --- |
-| Identity and tenancy | Platform onboarding, shop and branch roles, Sanctum, staff setup and resets | User lifecycle and audit trail, explicit branch membership if users cover multiple sites, revocable register devices, separate platform and shop privileges. |
+| Identity and tenancy | Platform onboarding, shop and branch roles, Sanctum, staff setup and resets, append-only business audit trail | User lifecycle, explicit branch membership if users cover multiple sites, revocable register devices, separate platform and shop privileges. |
 | Catalog and pricing | SKU, barcode, categories, variants, unit prices and costs, shop tax setting | Product families and variants, units and packaging, per-branch price lists, effective-dated tax rules, promotion eligibility and stacking, price override approval. Snapshot prices, tax, and discounts at checkout. |
 | Register and sales | Transactional single-tender checkout, receipt snapshots, idempotent retry | Register and shift, suspended carts, split tenders, discounts, receipt sequences, return and void workflows. Reference original sale lines for returns and cap cumulative returned units. |
 | Inventory and purchasing | Branch stock balance, append-only movements, transfers, full PO receiving | Stock counts and variance approval, partial receiving and supplier returns, in-transit and received transfer states, reservations for asynchronous payment, inventory costing and optional lot tracking. |
@@ -44,6 +44,10 @@ Retail order APIs commonly represent line items, modifiers, taxes and adjustment
 - Add registers and shifts before till reconciliation. At close, compare opening float plus cash inflows minus cash refunds, payouts and drops with the counted cash. Persist the count, variance, operator and approval.
 - For live tenders, store a payment attempt before calling a provider. Keep provider references and idempotency keys per attempt, authenticate inbound callbacks, deduplicate events and reconcile ambiguous results. Complete the sale against a confirmed tender and a valid reservation. Handle expiration, cancellation and refund as explicit transitions. [Stripe Payment Intents](https://docs.stripe.com/payments/payment-intents)
 - Store a durable outbox row in the same transaction as each event that must reach an external system. Workers claim committed rows and retry with backoff. Deduplicate consumers using stable event IDs, and retain failed work for operational review. Laravel after-commit dispatch is appropriate when the task must wait for a successful database commit. [Laravel queues and database transactions](https://laravel.com/docs/13.x/queues#jobs-and-database-transactions)
+
+## Audit trail
+
+Laravel records successful business operations and selected account events in PostgreSQL. Each business write and its audit event share a transaction. The audit read API authorizes platform and shop administrator scopes independently. Audit metadata uses explicit fields, including actor role, subject IDs, and operation references. Uploaded contents, secrets, and full before/after snapshots stay outside the audit trail. PostgreSQL rejects ordinary updates, deletes, and truncation. Use a non-owner application role and separate schema administration privileges to preserve that boundary. Failed authentication and security monitoring belong in a separate operational stream.
 
 ## Analytics contract
 

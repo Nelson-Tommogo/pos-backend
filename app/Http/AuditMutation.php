@@ -3,6 +3,7 @@
 namespace App\Http;
 
 use Closure;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,6 +17,10 @@ class AuditMutation
         try {
             return DB::transaction(function () use ($request, $next, $action, $subject): Response {
                 $response = $next($request);
+                $failure = $response->exception ?? null;
+                if ($failure instanceof DeadlockException && $failure->getPrevious() !== null) {
+                    throw $failure->getPrevious();
+                }
                 if (! $response->isSuccessful()) {
                     throw new HttpResponseException($response);
                 }
@@ -34,6 +39,9 @@ class AuditMutation
                 };
                 $branch = $data['branch_id'] ?? $request->attributes->get('audit_branch_id');
                 $details = $request->attributes->get('audit_details', []);
+                if (in_array($action, ['user.create', 'user.update', 'user.invite'], true)) {
+                    $details['assigned_role'] = $data['role'];
+                }
                 if ($action === 'credit.repay') {
                     $details['customer_id'] = $data['customer_id'];
                 }
@@ -44,7 +52,7 @@ class AuditMutation
                 AuditTrail::record($request->user(), $action, $resource, $id, $branch, $details, $workspace);
 
                 return $response;
-            });
+            }, 3);
         } catch (HttpResponseException $exception) {
             return $exception->getResponse();
         }

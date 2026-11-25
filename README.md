@@ -56,6 +56,7 @@ Routes below are relative to `/api/v1`.
 | Sales and receipts | `POST /sales/checkout`, `GET /sales[/{id}]`, `GET /receipts[/{id}]`. Receipt details contain the item, customer, tax, branding, and payment data captured at checkout. |
 | Credit and payments | `GET /credit-customers`, `POST /credit-customers/{customer}/repayments`, `GET /payments[/{id}]`, `POST /payments`. A repayment or manual payment takes `idempotency_key` (UUID), `branch_id`, `method`, `amount_minor`, and optional `reference`. Payments are append-only. |
 | Analytics | `GET /analytics`, `GET /reports`, and `GET /dashboard` accept `from` and `to` as inclusive `YYYY-MM-DD` dates, optional `branch_id`, and `timezone`. The default is the past seven days including today in `Africa/Nairobi`. |
+| Audit trail | `GET /audit-events` for shop and platform administrators. Filters include `from`, `to`, `actor_id`, `action`, `branch_id`, `subject_type`, and `subject_id`. |
 | Settings | `GET /settings`, `PATCH /settings` for `name`, `currency`, `tax_bps`, and `receipt` fields `name`, `address`, `phone`, `footer`, and `accent`. `PATCH /preferences` accepts `theme`, `paper_mm` (58, 80, or 210), and `print_after_checkout`. |
 
 A branch takes `name` and optional `address`. Products take `name`, `sku`, `price_minor`, `cost_minor`, and optional `barcode`, `category`, and `variant`. Suppliers and customers take `name` and optional `email`, `phone`, and `address`. Administrators can set `credit_limit_minor` on customers. Expenses take `branch_id`, `description`, `amount_minor`, and `incurred_on` as `YYYY-MM-DD`.
@@ -87,6 +88,16 @@ The analytics routes return the sales totals, daily sales, payment mix, cashier 
 ### Bulk imports
 
 Download the matching template at `GET /api/v1/{resource}/template`. Upload UTF-8 CSV or XLSX using multipart field `file` at `POST /api/v1/{resource}/import`. Imports create records in the authenticated shop, with a 5 MB file limit, a 500-record limit, and validation before the transaction commits. Customer and user imports require a shop administrator. Supplier and product imports require stock-management permissions. Use audited stock, purchase, and checkout operations for changes that post financial or stock movements.
+
+### Audit trail
+
+Run `php artisan migrate` to create the audit table. Audit events record successful sign-ins, sign-outs, password resets, shop onboarding, user changes, directory changes, imports, inventory operations, purchases, checkout, payments, repayments, and settings changes from that point forward. Business mutations and their audit entries commit together. Retrying a completed checkout, repayment, payment, or goods receipt leaves one event for the committed operation.
+
+Shop administrators see events for their own shop. Platform administrators see platform-administrator activity, including onboarding, across shops. The API returns 50 newest-first events per page. Date filters apply to inclusive UTC dates. Each event records the actor, role, action, affected record and branch where applicable, timestamp, and limited operation details such as imported record IDs or stock movement IDs. Passwords, tokens, request bodies, and file contents are excluded. Failed requests and record reads are outside this business audit trail.
+
+Example: `GET /api/v1/audit-events?action=sale.checkout&branch_id=1&from=2026-11-01`
+
+The database blocks updates, deletes, and truncation of audit rows through ordinary SQL. Use a separate migration account and a non-owner application role in production so application credentials cannot disable the audit trigger or drop the table.
 
 ## Checkout
 

@@ -44,8 +44,9 @@ class ImportController
             $this->invalid('Use the CSV template headers and include at least one record.');
         }
 
-        DB::transaction(function () use ($workspace, $directory, $administration, $resource, $rows, $headers): void {
+        $ids = DB::transaction(function () use ($workspace, $directory, $administration, $resource, $rows, $headers): array {
             DB::table('shops')->where('id', $workspace->shop)->lockForUpdate()->first();
+            $ids = [];
             foreach ($rows as $index => $row) {
                 try {
                     if (count($row) > count($headers)) {
@@ -54,7 +55,7 @@ class ImportController
                     $data = array_combine($headers, array_pad($row, count($headers), null));
                     $data = array_map(fn ($value) => $value === null || $value === '' ? null : $value, $data);
                     if ($resource === 'users') {
-                        $administration->saveUser($workspace, $data);
+                        $ids[] = $administration->saveUser($workspace, $data)->id;
 
                         continue;
                     }
@@ -66,7 +67,7 @@ class ImportController
                         }
                         $data = validator($data, $directory->rules($workspace, $resource, null))->validate();
                     }
-                    DB::table($resource)->insert($data + ['shop_id' => $workspace->shop]);
+                    $ids[] = DB::table($resource)->insertGetId($data + ['shop_id' => $workspace->shop]);
                 } catch (ValidationException $exception) {
                     $errors = [];
                     foreach ($exception->errors() as $field => $messages) {
@@ -75,7 +76,10 @@ class ImportController
                     throw ValidationException::withMessages($errors);
                 }
             }
+
+            return $ids;
         });
+        $request->attributes->set('audit_details', ['record_ids' => $ids]);
 
         return response()->json(['imported' => count($rows)], 201);
     }

@@ -5,6 +5,7 @@ namespace App\Http;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class AuditController
 {
@@ -33,7 +34,7 @@ class AuditController
             }
         }
         if (isset($data['from'], $data['to']) && $data['from'] > $data['to']) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['to' => 'The end date must follow the start date.']);
+            throw ValidationException::withMessages(['to' => 'The end date must follow the start date.']);
         }
         if (isset($data['from'])) {
             $query->where('created_at', '>=', CarbonImmutable::parse($data['from'], 'UTC')->startOfDay());
@@ -42,7 +43,7 @@ class AuditController
             $query->where('created_at', '<', CarbonImmutable::parse($data['to'], 'UTC')->startOfDay()->addDay());
         }
 
-        return $query->orderByDesc('created_at')->orderByDesc('id')->cursorPaginate(50)->withQueryString()
+        return $query->orderByDesc('created_at')->orderByDesc('id')->simplePaginate(50)->withQueryString()
             ->through(function (object $event): object {
                 $event->details = json_decode($event->details, flags: JSON_THROW_ON_ERROR);
 
