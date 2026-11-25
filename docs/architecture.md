@@ -24,7 +24,7 @@ flowchart LR
 
 | Domain | Implemented | Target architecture |
 | --- | --- | --- |
-| Identity and tenancy | Platform onboarding, shop and branch roles, Sanctum, staff setup and resets, append-only business audit trail | User lifecycle, explicit branch membership if users cover multiple sites, revocable register devices, separate platform and shop privileges. |
+| Identity and tenancy | Super admin shop and administrator provisioning, shop and branch roles, Sanctum, staff setup and resets, append-only business audit trail | User lifecycle, explicit branch membership if users cover multiple sites, revocable register devices, separate platform and shop privileges. |
 | Catalog and pricing | SKU, barcode, categories, variants, unit prices and costs, shop tax setting | Product families and variants, units and packaging, per-branch price lists, effective-dated tax rules, promotion eligibility and stacking, price override approval. Snapshot prices, tax, and discounts at checkout. |
 | Register and sales | Transactional single-tender checkout, receipt snapshots, idempotent retry | Register and shift, suspended carts, split tenders, discounts, receipt sequences, return and void workflows. Reference original sale lines for returns and cap cumulative returned units. |
 | Inventory and purchasing | Branch stock balance, append-only movements, transfers, full PO receiving | Stock counts and variance approval, partial receiving and supplier returns, in-transit and received transfer states, reservations for asynchronous payment, inventory costing and optional lot tracking. |
@@ -38,7 +38,7 @@ Retail order APIs commonly represent line items, modifiers, taxes and adjustment
 
 ## Transaction and integration design
 
-- Derive tenant and branch access from the authenticated principal. Scope lookups, writes, exports and provider events by shop. Enforce applicable tenant relationships with composite foreign keys. Restrict financial reports and PII to authorized roles.
+- Derive tenant and branch access from the authenticated principal. The platform super admin provisions tenant administrators. Shop administrators have authority across their own shop and its branches. Scope lookups, writes, exports and provider events by shop. Enforce applicable tenant relationships with composite foreign keys. Restrict financial reports and PII to authorized roles.
 - Keep integer minor units for money and store currency on financial facts. Store timestamps in UTC and use a persisted branch business timezone and explicit day boundaries for closeout. Until branch timezones are introduced, reports use a request timezone with an Africa/Nairobi default.
 - Settle recorded sales atomically with inventory movements and receivables. Keep posted records immutable. Implement voids, returns and corrections with compensating rows and an original-record reference. Record the actor, reason and timestamps. Lock affected records in a consistent order and apply bounded retries to database concurrency failures.
 - Add registers and shifts before till reconciliation. At close, compare opening float plus cash inflows minus cash refunds, payouts and drops with the counted cash. Persist the count, variance, operator and approval.

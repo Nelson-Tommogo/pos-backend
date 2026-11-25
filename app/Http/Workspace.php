@@ -28,7 +28,7 @@ class Workspace
 
     public function authorize(array $roles): void
     {
-        abort_unless(in_array($this->user->role, $roles, true), 403);
+        abort_unless($this->user->role === 'administrator' || in_array($this->user->role, $roles, true), 403);
     }
 
     public function records(string $table): Builder

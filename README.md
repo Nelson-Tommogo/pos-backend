@@ -1,6 +1,6 @@
 # Northstar POS backend
 
-Laravel 13 and PostgreSQL REST API for the Northstar Nuxt point-of-sale workspace. The API persists shops, users, catalog and directory records, stock, purchases, expenses, receipts, payments, and credit accounts. A platform administrator provisions the shop and its first administrator.
+Laravel 13 and PostgreSQL REST API for the Northstar Nuxt point-of-sale workspace. The API persists shops, users, catalog and directory records, stock, purchases, expenses, receipts, payments, and credit accounts. A super admin, represented by the API role `platform_admin`, provisions shops and their administrators.
 
 See [POS architecture](docs/architecture.md) for domain boundaries, analytics definitions, and the roadmap for register shifts, returns, and provider integrations.
 
@@ -34,7 +34,7 @@ Set `FRONTEND_URL` to the Nuxt origin. It configures CORS and the link in email 
 Use `http://localhost:8000/api/v1` as the local API base. Send `Accept: application/json` and include `Authorization: Bearer <token>` on authenticated requests. JSON writes use `Content-Type: application/json`. The API returns JSON validation errors as `422` and uses `401` for missing or expired authentication, `403` for forbidden operations, and `404` for unavailable records. Lists use Laravel's paginator with records in `data` and metadata that includes `current_page`, `last_page`, and `total`.
 
 1. Call `POST /auth/login` with `email` and `password`. The response includes `user` and a bearer token valid for 12 hours.
-2. As the platform administrator, call `POST /shops` with `shop_name`, `name`, `email`, and `password`.
+2. As the super admin, call `POST /shops` with `shop_name`, `name`, `email`, and `password`. To add an administrator to an existing shop, call `POST /shops/{shop}/administrators` with `name`, `email`, and `password`. The API assigns the `administrator` role from the route and uses the shop in the URL.
 3. Sign in as that shop administrator, create a branch, and add staff. Use `GET /me` to initialize role-aware navigation. Shop and branch authorization are enforced by the API based on the authenticated user.
 4. Use `POST /auth/forgot-password` with `email` and `POST /auth/reset-password` with `email`, `token`, `password`, and `password_confirmation`. The reset revokes active tokens. `POST /auth/logout` revokes the current token.
 
@@ -46,7 +46,7 @@ Routes below are relative to `/api/v1`.
 
 | Area | Routes and input |
 | --- | --- |
-| Onboarding | `GET /shops`, `POST /shops` for platform administrators |
+| Onboarding | `GET /shops`, `POST /shops`, and `POST /shops/{shop}/administrators` for super admins (`platform_admin`). |
 | Staff | `GET /team[/{id}]`, `GET /users[/{id}]`, `POST /users`, `PATCH /users/{id}`. User fields are `name`, `email`, `password`, `role`, and `branch_id`. Use `POST /users/invitations` with the same fields except `password` to send a password-setup link. |
 | Directories | `GET /{resource}[/{id}]`, `POST /{resource}`, `PATCH /{resource}/{id}` for `branches`, `products`, `customers`, `suppliers`, and `expenses`. Lists accept `q`. Products also accept exact `barcode` lookup. |
 | Imports | `GET /{resource}/template`, `POST /{resource}/import` for `products`, `users`, `customers`, and `suppliers`. Upload multipart field `file` as CSV or XLSX. Import reads the first worksheet, with one header row and at most 500 records and 5 MB. The entire import rolls back on a row error. |
@@ -61,7 +61,7 @@ Routes below are relative to `/api/v1`.
 
 A branch takes `name` and optional `address`. Products take `name`, `sku`, `price_minor`, `cost_minor`, and optional `barcode`, `category`, and `variant`. Suppliers and customers take `name` and optional `email`, `phone`, and `address`. Administrators can set `credit_limit_minor` on customers. Expenses take `branch_id`, `description`, `amount_minor`, and `incurred_on` as `YYYY-MM-DD`.
 
-Shop roles are `administrator`, `branch_manager`, `store_manager`, `cashier`, `teller`, `accountant`, and `stock_clerk`. Shop administrators have shop-wide access. Each other role requires one branch. Managers and stock clerks can operate inventory, and administrators initiate cross-branch transfers. Administrators, managers, cashiers, and tellers can check out sales. Administrators, managers, and accountants can access financial reports and the payment ledger.
+Shop roles are `administrator`, `branch_manager`, `store_manager`, `cashier`, `teller`, `accountant`, and `stock_clerk`. Shop administrators can perform all shop operations, including staff management, checkout, inventory, finance, and viewing their shop audit trail. Super admins provision shops and administrators at the platform level. Each other role requires one branch. Managers and stock clerks can operate inventory, and administrators initiate cross-branch transfers. Administrators, managers, cashiers, and tellers can check out sales. Administrators, managers, and accountants can access financial reports and the payment ledger.
 
 ### Analytics filters
 

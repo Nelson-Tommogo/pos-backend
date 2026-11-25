@@ -27,6 +27,8 @@ Route::prefix('v1')->group(function (): void {
         Route::post('auth/logout', [AuthController::class, 'logout'])->middleware(AuditMutation::class.':auth.logout');
         Route::get('shops', [AdministrationController::class, 'shops']);
         Route::post('shops', [AdministrationController::class, 'onboard'])->middleware(AuditMutation::class.':shop.create,shop');
+        Route::post('shops/{shop}/administrators', [AdministrationController::class, 'addAdministrator'])
+            ->whereNumber('shop')->middleware(AuditMutation::class.':shop.administrator.create,user');
         Route::get('settings', [AdministrationController::class, 'settings']);
         Route::patch('settings', [AdministrationController::class, 'updateSettings'])->middleware(AuditMutation::class.':settings.update,shop');
         Route::patch('preferences', [AdministrationController::class, 'preferences'])->middleware(AuditMutation::class.':preferences.update,user');

@@ -22,21 +22,43 @@ class AdministrationController
     public function onboard(Request $request)
     {
         abort_unless($request->user()->role === 'platform_admin', 403);
-        $request->merge(['email' => strtolower($request->string('email')->toString())]);
-        $data = $request->validate([
-            'shop_name' => 'required|string|max:160',
-            'name' => 'required|string|max:160',
-            'email' => 'required|email|max:255|unique:users',
-            'password' => ['required', 'string', 'min:12', 'regex:/\\A[^\\x00]{1,72}\\z/'],
-        ]);
+        $data = $this->administratorData($request, ['shop_name' => 'required|string|max:160']);
 
         return DB::transaction(function () use ($data) {
             $shop = DB::table('shops')->insertGetId(['name' => $data['shop_name']]);
             unset($data['shop_name']);
-            $administrator = User::create($data + ['shop_id' => $shop, 'role' => 'administrator']);
+            $administrator = $this->createAdministrator($shop, $data);
 
             return response()->json(['shop_id' => $shop, 'administrator' => $administrator], 201);
         });
+    }
+
+    public function addAdministrator(Request $request, int $shop)
+    {
+        abort_unless($request->user()->role === 'platform_admin', 403);
+        DB::table('shops')->where('id', $shop)->firstOrFail();
+        $administrator = $this->createAdministrator($shop, $this->administratorData($request));
+
+        return response()->json($administrator, 201);
+    }
+
+    private function administratorData(Request $request, array $extraRules = []): array
+    {
+        $input = $request->all();
+        if (is_string($input['email'] ?? null)) {
+            $input['email'] = strtolower($input['email']);
+        }
+
+        return validator($input, [
+            'name' => 'required|string|max:160',
+            'email' => 'required|email|max:255|unique:users',
+            'password' => ['required', 'string', 'min:12', 'regex:/\\A[^\\x00]{1,72}\\z/'],
+        ] + $extraRules)->validate();
+    }
+
+    private function createAdministrator(int $shop, array $data): User
+    {
+        return User::create($data + ['shop_id' => $shop, 'role' => 'administrator', 'branch_id' => null]);
     }
 
     public function team(Workspace $workspace, ?int $id = null)

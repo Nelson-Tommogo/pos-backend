@@ -31,15 +31,15 @@ class AuditMutation
 
                 $data = $response instanceof JsonResponse ? $response->getData(true) : [];
                 $resource = $subject ?? $request->route('resource');
-                $workspace = $action === 'shop.create' ? $data['shop_id'] : null;
-                $id = $workspace ?? $data['id'] ?? $data['product_id'] ?? $request->attributes->get('audit_subject_id') ?? match ($resource) {
+                $workspace = in_array($action, ['shop.create', 'shop.administrator.create'], true) ? $data['shop_id'] : null;
+                $id = $data['id'] ?? $workspace ?? $data['product_id'] ?? $request->attributes->get('audit_subject_id') ?? match ($resource) {
                     'shop' => $request->user()->shop_id,
                     'user' => $request->user()->id,
                     default => null,
                 };
                 $branch = $data['branch_id'] ?? $request->attributes->get('audit_branch_id');
                 $details = $request->attributes->get('audit_details', []);
-                if (in_array($action, ['user.create', 'user.update', 'user.invite'], true)) {
+                if (in_array($action, ['user.create', 'user.update', 'user.invite', 'shop.administrator.create'], true)) {
                     $details['assigned_role'] = $data['role'];
                 }
                 if ($action === 'credit.repay') {
