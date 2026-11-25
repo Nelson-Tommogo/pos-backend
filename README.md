@@ -2,6 +2,8 @@
 
 Laravel 13 and PostgreSQL REST API for the Northstar Nuxt point-of-sale workspace. The API persists shops, users, catalog and directory records, stock, purchases, expenses, receipts, payments, and credit accounts. A platform administrator provisions the shop and its first administrator.
 
+See [POS architecture](docs/architecture.md) for domain boundaries, analytics definitions, and the roadmap for register shifts, returns, and provider integrations.
+
 ## Run locally
 
 Install PHP 8.4.1 or later with the Composer platform extensions, including `pdo_pgsql`, `simplexml`, and `zip`. Start PostgreSQL and create an empty database and an application login. For example, from a terminal where `psql -d postgres` connects as a PostgreSQL administrator:
@@ -59,6 +61,10 @@ Routes below are relative to `/api/v1`.
 A branch takes `name` and optional `address`. Products take `name`, `sku`, `price_minor`, `cost_minor`, and optional `barcode`, `category`, and `variant`. Suppliers and customers take `name` and optional `email`, `phone`, and `address`. Administrators can set `credit_limit_minor` on customers. Expenses take `branch_id`, `description`, `amount_minor`, and `incurred_on` as `YYYY-MM-DD`.
 
 Shop roles are `administrator`, `branch_manager`, `store_manager`, `cashier`, `teller`, `accountant`, and `stock_clerk`. Shop administrators have shop-wide access. Each other role requires one branch. Managers and stock clerks can operate inventory, and administrators initiate cross-branch transfers. Administrators, managers, cashiers, and tellers can check out sales. Administrators, managers, and accountants can access financial reports and the payment ledger.
+
+### Analytics response
+
+Both analytics routes retain the sales totals, daily sales, payment mix, cashier totals, and inventory summaries. `financial_summary` adds pre-tax sales, tax, estimated cost, recorded expenses, credit sales, and credit repayments. `top_products` returns up to 20 product IDs ranked by pre-tax sales with units sold. The date range filters financial activity. Stock summaries report current balances.
 
 ## Checkout
 

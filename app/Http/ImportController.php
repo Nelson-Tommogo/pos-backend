@@ -153,7 +153,7 @@ class ImportController
         }
         $text = $zip->getFromName($name, 5 * 1024 * 1024);
         if ($text === false || str_contains($text, "\0") || stripos($text, '<!DOCTYPE') !== false
-            || ! ($xml = @simplexml_load_string($text, options: LIBXML_NONET))) {
+            || ($xml = @simplexml_load_string($text, options: LIBXML_NONET)) === false) {
             $this->invalid('The workbook XML is invalid.');
         }
 
@@ -181,6 +181,9 @@ class ImportController
         }
         if (count($rows) >= 501) {
             $this->invalid('A file can contain at most 500 records.');
+        }
+        while ($row !== [] && trim((string) end($row)) === '') {
+            array_pop($row);
         }
         $rows[] = $row;
     }
