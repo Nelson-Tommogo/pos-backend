@@ -1,0 +1,158 @@
+<?php
+
+namespace App\Http;
+
+use App\Models\User;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+
+class AdministrationController
+{
+    public function shops(Request $request)
+    {
+        abort_unless($request->user()->role === 'platform_admin', 403);
+
+        return DB::table('shops')->orderBy('id')->paginate(50);
+    }
+
+    public function onboard(Request $request)
+    {
+        abort_unless($request->user()->role === 'platform_admin', 403);
+        $request->merge(['email' => strtolower($request->string('email')->toString())]);
+        $data = $request->validate([
+            'shop_name' => 'required|string|max:160',
+            'name' => 'required|string|max:160',
+            'email' => 'required|email|max:255|unique:users',
+            'password' => 'required|string|min:12|max:72',
+        ]);
+
+        return DB::transaction(function () use ($data) {
+            $shop = DB::table('shops')->insertGetId(['name' => $data['shop_name']]);
+            unset($data['shop_name']);
+            $administrator = User::create($data + ['shop_id' => $shop, 'role' => 'administrator']);
+
+            return response()->json(['shop_id' => $shop, 'administrator' => $administrator], 201);
+        });
+    }
+
+    public function team(Workspace $workspace, ?int $id = null)
+    {
+        $workspace->authorize(['administrator', 'branch_manager', 'store_manager']);
+        $query = User::where('shop_id', $workspace->shop);
+        if ($workspace->user->branch_id !== null) {
+            $query->where('branch_id', $workspace->user->branch_id);
+        }
+
+        return $id === null ? $query->orderBy('id')->paginate(50) : $query->findOrFail($id);
+    }
+
+    public function user(Request $request, Workspace $workspace, ?int $id = null)
+    {
+        $workspace->authorize(['administrator']);
+        $user = $id === null ? null : User::where('shop_id', $workspace->shop)->findOrFail($id);
+        $data = $request->all();
+        if (array_key_exists('email', $data) && is_string($data['email'])) {
+            $data['email'] = strtolower($data['email']);
+        }
+
+        return DB::transaction(function () use ($workspace, $id, $user, $data) {
+            $saved = $this->saveUser($workspace, $data, $user);
+
+            return response()->json($saved, $id === null ? 201 : 200);
+        });
+    }
+
+    public function saveUser(Workspace $workspace, array $input, ?User $user = null): User
+    {
+        $required = $user ? 'sometimes|required' : 'required';
+        if (is_string($input['email'] ?? null)) {
+            $input['email'] = strtolower($input['email']);
+        }
+        $email = Rule::unique('users', 'email');
+        if ($user) {
+            $email->ignore($user->id);
+        }
+        $data = validator($input, [
+            'name' => "$required|string|max:160",
+            'email' => [$required, 'email', 'max:255', $email],
+            'password' => "$required|string|min:12|max:72",
+            'role' => [$required, Rule::in(Workspace::ROLES)],
+            'branch_id' => ['nullable', 'integer', $workspace->exists('branches')],
+        ])->validate();
+        $role = $data['role'] ?? $user?->role;
+        $branch = array_key_exists('branch_id', $data) ? $data['branch_id'] : $user?->branch_id;
+        if ($role !== 'administrator' && $branch === null) {
+            throw ValidationException::withMessages(['branch_id' => 'A branch is required for this role.']);
+        }
+        if ($user?->id === $workspace->user->id && $role !== 'administrator') {
+            throw ValidationException::withMessages(['role' => 'You cannot remove your own administrator role.']);
+        }
+        $data['branch_id'] = $role === 'administrator' ? null : $branch;
+
+        if ($user === null) {
+            return User::create($data + ['shop_id' => $workspace->shop]);
+        }
+
+        $user->update($data);
+        if ($user->wasChanged(['password', 'role', 'branch_id', 'email'])) {
+            $user->tokens()->delete();
+        }
+
+        return $user;
+    }
+
+    public function settings(Workspace $workspace)
+    {
+        $shop = $workspace->settings();
+        $shop->receipt = json_decode($shop->receipt);
+
+        return response()->json($shop);
+    }
+
+    public function updateSettings(Request $request, Workspace $workspace)
+    {
+        $workspace->authorize(['administrator']);
+        $data = $request->validate([
+            'name' => 'sometimes|required|string|max:160',
+            'currency' => 'sometimes|required|regex:/^[A-Z]{3}$/',
+            'tax_bps' => 'sometimes|required|integer|between:0,10000',
+            'receipt' => 'sometimes|array:name,address,phone,footer,accent',
+            'receipt.*' => 'nullable|string|max:255',
+            'receipt.accent' => 'nullable|regex:/^#[0-9a-fA-F]{6}$/',
+        ]);
+        if (isset($data['receipt'])) {
+            $data['receipt'] = json_encode($data['receipt'], JSON_THROW_ON_ERROR);
+        }
+
+        DB::transaction(function () use ($workspace, $data): void {
+            $shop = DB::table('shops')->where('id', $workspace->shop);
+            $current = $shop->lockForUpdate()->first();
+            if (isset($data['currency']) && $data['currency'] !== $current->currency
+                && ($workspace->records('sales')->exists() || $workspace->records('payments')->exists()
+                    || $workspace->records('expenses')->exists() || $workspace->records('purchases')->exists()
+                    || $workspace->records('products')->exists() || $workspace->records('customers')->where('credit_limit_minor', '>', 0)->exists())) {
+                throw ValidationException::withMessages(['currency' => 'Currency can only change before monetary records exist.']);
+            }
+            if ($data !== []) {
+                $shop->update($data);
+            }
+        });
+
+        return $this->settings($workspace);
+    }
+
+    public function preferences(Request $request)
+    {
+        $data = $request->validate([
+            'theme' => ['sometimes', Rule::in(['meadow', 'ocean', 'plum', 'graphite', 'dark'])],
+            'paper_mm' => 'sometimes|integer|in:58,80,210',
+            'print_after_checkout' => 'sometimes|boolean',
+        ]);
+        $user = $request->user();
+        $user->update(['preferences' => array_replace($user->preferences, $data)]);
+
+        return $user->preferences;
+    }
+}
