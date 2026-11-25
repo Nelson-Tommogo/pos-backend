@@ -2,6 +2,8 @@
 
 namespace App\Http;
 
+use App\Jobs\SendPosEmail;
+
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -68,6 +70,9 @@ class DirectoryController
             }
             if ($id === null) {
                 $newId = DB::table($resource)->insertGetId($data + ['shop_id' => $workspace->shop]);
+                if ($resource === 'customers' && isset($data['email'])) {
+                    SendPosEmail::customer($workspace->shop, $newId);
+                }
 
                 return response()->json($query->where('id', $newId)->firstOrFail(), 201);
             }

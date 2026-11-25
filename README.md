@@ -15,6 +15,7 @@ See [POS architecture](docs/architecture.md) for domain boundaries, analytics de
 - [Bulk imports](#bulk-imports)
 - [Audit trail](#audit-trail)
 - [Checkout](#checkout)
+- [Email notifications](#email-notifications)
 - [Deploy and operate](#deploy-and-operate)
 - [Troubleshooting](#troubleshooting)
 
@@ -56,7 +57,7 @@ php artisan pos:platform-admin alex@northstar.store --demo
 php artisan pos:platform-admin you@example.com
 ```
 
-Set `FRONTEND_URL` to the exact Nuxt origin, such as `http://localhost:3000`. It configures CORS and the destination of invitation and reset links. In local development, messages are written to the Laravel log. To deliver them, configure `MAIL_MAILER=smtp`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SCHEME`, and `MAIL_FROM_ADDRESS`. Allow at least 5 MB for individual uploads in PHP and allow multipart overhead in the PHP and reverse proxy request size limits.
+Set `FRONTEND_URL` to the exact Nuxt origin, such as `http://localhost:3000`. It configures CORS and the destination of account setup and password reset links. See [Email notifications](#email-notifications) for local and production delivery. Allow at least 5 MB for individual uploads in PHP and allow multipart overhead in the PHP and reverse proxy request size limits.
 
 ## First sale walkthrough
 
@@ -214,11 +215,40 @@ Example `POST /api/v1/sales/checkout` body:
 
 Use `cash`, `mpesa`, `card`, `bank_transfer`, or `credit`. Credit requires `customer_id`. Optional `customer` fields are `name`, `phone`, and `email`. Use `reference` for a payment reference. The backend calculates totals from the shop's prices and tax settings. It commits the sale, stock movements, credit balance, and payment together. An identical retry by the same user returns the existing sale or payment. Reusing the key for a different request returns `409`.
 
+## Email notifications
+
+- New shop administrators and staff receive a password-setup link. This includes shop onboarding, direct account creation, staff invitations, and user imports. Setup links use the password recovery page and expire after 60 minutes. A person can request a new link from the sign-in page.
+- Customers created manually or through import receive a welcome message when their record includes an email address.
+- To email an itemized sales receipt, send `"email_receipt": true` to `POST /sales/checkout`. Provide `customer.email` in the request or select a customer account with a saved email address. The receipt goes to the email captured on the sale. An identical checkout retry does not queue another email.
+
+For local development, keep `MAIL_MAILER=log` and `QUEUE_CONNECTION=sync`. Messages are written to `storage/logs/laravel.log`. The log contains local setup links, so use test addresses and keep the log private. In production, configure SMTP and a persistent queue.
+
+```dotenv
+MAIL_MAILER=smtp
+MAIL_HOST=smtp.example.com
+MAIL_PORT=587
+MAIL_SCHEME=smtp
+MAIL_USERNAME=your-smtp-username
+MAIL_PASSWORD=your-smtp-password
+MAIL_FROM_ADDRESS=pos@example.com
+MAIL_FROM_NAME="Northstar POS"
+QUEUE_CONNECTION=database
+```
+
+Use the settings your SMTP provider supplies. Run the migrations to create the queue tables, then supervise a worker:
+
+```bash
+php artisan migrate --force
+php artisan queue:work database --queue=mail --timeout=30
+```
+
+With the default PostgreSQL connection used for the database queue, new mail jobs commit with the corresponding business records. Workers retry failed jobs. Check failures with `php artisan queue:failed` and use `php artisan queue:retry <id>` after resolving the delivery issue. Restart long-running workers after deployments. SMTP delivery is asynchronous and an ambiguous provider response can result in redelivery.
+
 ## Deploy and operate
 
 1. Serve Laravel over HTTPS with the web root at `public/`. Set `APP_ENV=production`, `APP_DEBUG=false`, and the real `APP_URL` and `FRONTEND_URL`. Store `APP_KEY`, database credentials, and mail credentials in the environment's secret store.
 2. Run `composer install --no-dev --optimize-autoloader` during the build. Run `php artisan migrate --force` with the schema migration account during deployment, then cache configuration and routes. Keep `storage/` and `bootstrap/cache/` writable by the runtime. Use the non-owner application role described in [Audit trail](#audit-trail) for API traffic.
-3. Configure shared rate-limit storage for multiple API instances and set up SMTP for staff invitations and password resets. Verify the origin, invitation link, sign-in, and receipt printing on the intended register devices.
+3. Configure shared rate-limit storage for multiple API instances and set up SMTP and a supervised worker for email delivery. Verify the origin, invitation link, sign-in, and receipt printing on the intended register devices.
 4. Back up PostgreSQL regularly and test restoring both business and audit tables. Monitor checkout errors, database lock waits, disk usage, and mail delivery. Confirm applicable fiscal invoicing requirements before going live. The current backend records tenders and prints receipt data through the frontend. Live settlement, returns, split tenders, register shifts, and eTIMS integration are covered in the [architecture roadmap](docs/architecture.md).
 
 ## Troubleshooting

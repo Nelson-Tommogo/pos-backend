@@ -2,6 +2,8 @@
 
 namespace App\Http;
 
+use App\Jobs\SendPosEmail;
+
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -67,7 +69,11 @@ class ImportController
                         }
                         $data = validator($data, $directory->rules($workspace, $resource, null))->validate();
                     }
-                    $ids[] = DB::table($resource)->insertGetId($data + ['shop_id' => $workspace->shop]);
+                    $id = DB::table($resource)->insertGetId($data + ['shop_id' => $workspace->shop]);
+                    $ids[] = $id;
+                    if ($resource === 'customers' && isset($data['email'])) {
+                        SendPosEmail::customer($workspace->shop, $id);
+                    }
                 } catch (ValidationException $exception) {
                     $errors = [];
                     foreach ($exception->errors() as $field => $messages) {

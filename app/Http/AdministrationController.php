@@ -2,10 +2,10 @@
 
 namespace App\Http;
 
+use App\Jobs\SendPosEmail;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -58,7 +58,10 @@ class AdministrationController
 
     private function createAdministrator(int $shop, array $data): User
     {
-        return User::create($data + ['shop_id' => $shop, 'role' => 'administrator', 'branch_id' => null]);
+        $user = User::create($data + ['shop_id' => $shop, 'role' => 'administrator', 'branch_id' => null]);
+        SendPosEmail::account($user);
+
+        return $user;
     }
 
     public function team(Workspace $workspace, ?int $id = null)
@@ -90,14 +93,6 @@ class AdministrationController
         $user = $this->saveUser($workspace, $request->only('name', 'email', 'role', 'branch_id') + [
             'password' => Str::random(48),
         ]);
-        DB::afterCommit(function () use ($user): void {
-            try {
-                Password::sendResetLink(['email' => $user->email]);
-            } catch (\Throwable $exception) {
-                report($exception);
-            }
-        });
-
         return response()->json($user, 201);
     }
 
@@ -129,7 +124,10 @@ class AdministrationController
         $data['branch_id'] = $role === 'administrator' ? null : $branch;
 
         if ($user === null) {
-            return User::create($data + ['shop_id' => $workspace->shop]);
+            $user = User::create($data + ['shop_id' => $workspace->shop]);
+            SendPosEmail::account($user);
+
+            return $user;
         }
 
         $user->update($data);

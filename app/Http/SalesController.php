@@ -2,6 +2,7 @@
 
 namespace App\Http;
 
+use App\Jobs\SendPosEmail;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -67,6 +68,7 @@ class SalesController
             'customer.name' => 'nullable|string|max:160',
             'customer.phone' => 'nullable|string|max:60',
             'customer.email' => 'nullable|email|max:255',
+            'email_receipt' => 'sometimes|boolean',
             'items' => 'required|array|list|min:1|max:100',
             'items.*' => 'required|array:product_id,quantity',
             'items.*.product_id' => ['required', 'integer', 'distinct', $workspace->exists('products')],
@@ -82,10 +84,14 @@ class SalesController
         ], $data['items']);
         $customerDetails = $data['customer'] ?? [];
         ksort($customerDetails);
-        $hash = hash('sha256', json_encode([
+        $hashData = [
             $branch, (int) ($data['customer_id'] ?? 0), $customerDetails,
             $data['items'], $data['method'], $data['reference'] ?? null,
-        ], JSON_THROW_ON_ERROR));
+        ];
+        if ($data['email_receipt'] ?? false) {
+            $hashData[] = true;
+        }
+        $hash = hash('sha256', json_encode($hashData, JSON_THROW_ON_ERROR));
 
         return DB::transaction(function () use ($workspace, $inventory, $payments, $data, $branch, $hash) {
             $shop = DB::table('shops')->where('id', $workspace->shop)->lockForUpdate()->first();
@@ -131,6 +137,10 @@ class SalesController
                 $data['customer'] ?? [],
             );
 
+            if (($data['email_receipt'] ?? false) && empty($details['email'])) {
+                throw ValidationException::withMessages(['customer.email' => 'Provide an email address to send the receipt.']);
+            }
+
             $sale = DB::table('sales')->insertGetId([
                 'shop_id' => $workspace->shop,
                 'branch_id' => $branch,
@@ -151,6 +161,10 @@ class SalesController
                 $inventory->move($workspace, $branch, $item['product_id'], -$item['quantity'], 'sale', $sale);
             }
             $payments->record($workspace, $branch, 'sale', $data['method'], $total, $data['reference'] ?? null, $customer?->id, $sale);
+
+            if ($data['email_receipt'] ?? false) {
+                SendPosEmail::receipt($workspace->shop, $sale);
+            }
 
             return response()->json($this->receipt($workspace, $workspace->operations('sales')->where('id', $sale)->firstOrFail()), 201);
         }, 3);
